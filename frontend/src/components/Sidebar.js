@@ -26,27 +26,42 @@ const Sidebar = ({ isOpen, onClose }) => {
   );
 
   const roleColors = {
-    super_admin: '#e74c3c',
-    admin: '#e67e22',
-    manager: '#3498db',
-    cashier: '#2ecc71',
-    dispatcher: '#9b59b6',
-    warehouse: '#1abc9c',
-    rider: '#f39c12',
+    super_admin: '#e74c3c', admin: '#e67e22', manager: '#3498db',
+    cashier: '#2ecc71', dispatcher: '#9b59b6', warehouse: '#1abc9c', rider: '#f39c12',
   };
 
   const roleColor = roleColors[user?.role] || '#666';
 
   return (
     <>
+      {/* Dark overlay on mobile when sidebar open */}
       {isOpen && (
         <div
           onClick={onClose}
-          className="sidebar-overlay"
+          style={{
+            position: 'fixed', inset: 0,
+            background: 'rgba(0,0,0,0.5)',
+            zIndex: 99,
+          }}
         />
       )}
 
-      <div className={`sidebar ${isOpen ? 'open' : ''}`}>
+      {/* Sidebar */}
+      <div
+        style={{
+          width: '240px',
+          minHeight: '100vh',
+          background: '#1a1a2e',
+          display: 'flex',
+          flexDirection: 'column',
+          position: 'fixed',
+          left: 0, top: 0,
+          zIndex: 100,
+          transform: isOpen ? 'translateX(0)' : undefined,
+          transition: 'transform 0.3s ease',
+        }}
+        className={`sidebar${isOpen ? ' open' : ''}`}
+      >
         {/* Header */}
         <div style={{ padding: '20px', borderBottom: '1px solid rgba(255,255,255,0.1)', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <div>
@@ -62,7 +77,7 @@ const Sidebar = ({ isOpen, onClose }) => {
           </button>
         </div>
 
-        {/* Nav links */}
+        {/* Nav */}
         <nav style={{ flex: 1, padding: '12px 0', overflowY: 'auto' }}>
           {links.map((link) => (
             <NavLink
@@ -71,13 +86,10 @@ const Sidebar = ({ isOpen, onClose }) => {
               end={link.exact}
               onClick={onClose}
               style={({ isActive }) => ({
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
+                display: 'flex', alignItems: 'center', gap: '10px',
                 padding: '11px 20px',
                 color: isActive ? 'white' : 'rgba(255,255,255,0.65)',
-                textDecoration: 'none',
-                fontSize: '14px',
+                textDecoration: 'none', fontSize: '14px',
                 background: isActive ? 'rgba(255,255,255,0.1)' : 'transparent',
                 borderLeft: isActive ? '3px solid #4CAF50' : '3px solid transparent',
                 transition: 'all 0.15s',
@@ -89,7 +101,7 @@ const Sidebar = ({ isOpen, onClose }) => {
           ))}
         </nav>
 
-        {/* User info */}
+        {/* User */}
         {user && (
           <div style={{ padding: '16px 20px', borderTop: '1px solid rgba(255,255,255,0.1)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '12px' }}>
