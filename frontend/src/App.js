@@ -1,3 +1,4 @@
+import Staff from './pages/Staff';
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
@@ -25,6 +26,7 @@ function App() {
     <AuthProvider>
       <BrowserRouter>
         <Routes>
+          <Route path="/users" element={<PrivateRoute><Layout><Staff /></Layout></PrivateRoute>} />
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<PrivateRoute><Layout><Dashboard /></Layout></PrivateRoute>} />
           <Route path="/orders" element={<PrivateRoute><Layout><Orders /></Layout></PrivateRoute>} />
