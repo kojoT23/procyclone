@@ -1,234 +1,190 @@
-import React, { useState, useEffect, useCallback } from 'react';
-import { ridersAPI } from '../utils/api';
+import React, { useState, useEffect } from 'react';
+import { ridersAPI, ordersAPI } from '../utils/api';
 
 const Riders = () => {
   const [riders, setRiders] = useState([]);
+  const [orders, setOrders] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [pages, setPages] = useState(1);
-  const [search, setSearch] = useState('');
-  const [showModal, setShowModal] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [saving, setSaving] = useState(false);
+  const [showForm, setShowForm] = useState(false);
+  const [showAssign, setShowAssign] = useState(false);
+  const [editRider, setEditRider] = useState(null);
+  const [assign, setAssign] = useState({ order_id: '', rider_id: '' });
   const [form, setForm] = useState({ name: '', phone: '', vehicle_type: '', vehicle_number: '' });
 
-  const fetchRiders = useCallback(async () => {
+  const fetchData = async () => {
     try {
-      setLoading(true);
-      const params = { page, limit: 20 };
-      if (search) params.search = search;
-      const res = await ridersAPI.getAll(params);
-      setRiders(res.data.riders || []);
-      setTotal(res.data.total || 0);
-      setPages(res.data.pages || 1);
-    } catch (err) {
-      console.error(err);
-    } finally {
-      setLoading(false);
-    }
-  }, [page, search]);
-
-  useEffect(() => { fetchRiders(); }, [fetchRiders]);
-  useEffect(() => { setPage(1); }, [search]);
-
-  const openAdd = () => {
-    setEditing(null);
-    setForm({ name: '', phone: '', vehicle_type: '', vehicle_number: '' });
-    setShowModal(true);
+      const [r, o] = await Promise.all([ridersAPI.getAll(), ordersAPI.getAll()]);
+      setRiders(r.data.riders);
+      setOrders(o.data.orders.filter(o => o.status === 'confirmed' || o.status === 'pending'));
+    } catch (err) { console.error(err); }
+    finally { setLoading(false); }
   };
 
-  const openEdit = (rider) => {
-    setEditing(rider);
-    setForm({
-      name: rider.name || '',
-      phone: rider.phone || '',
-      vehicle_type: rider.vehicle_type || '',
-      vehicle_number: rider.vehicle_number || '',
-    });
-    setShowModal(true);
+  useEffect(() => {
+    fetchData();
+    const interval = setInterval(fetchData, 15000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const handleEdit = (rider) => {
+    setEditRider(rider);
+    setForm({ name: rider.name, phone: rider.phone, vehicle_type: rider.vehicle_type||'', vehicle_number: rider.vehicle_number||'' });
+    setShowForm(true);
   };
 
-  const handleSave = async () => {
-    if (!form.name || !form.phone) return alert('Name and phone are required');
+  const handleSubmit = async (e) => {
+    e.preventDefault();
     try {
-      setSaving(true);
-      if (editing) {
-        await ridersAPI.update(editing.id, form);
+      if (editRider) {
+        await ridersAPI.update(editRider.id, form);
+        alert('Rider updated!');
       } else {
         await ridersAPI.create(form);
+        alert('Rider added!');
       }
-      setShowModal(false);
-      fetchRiders();
-    } catch (err) {
-      alert(err.response?.data?.message || 'Error saving rider');
-    } finally {
-      setSaving(false);
-    }
+      setShowForm(false);
+      setEditRider(null);
+      setForm({ name: '', phone: '', vehicle_type: '', vehicle_number: '' });
+      fetchData();
+    } catch (err) { alert('Error saving rider'); }
   };
 
   const handleDelete = async (id) => {
-    if (!window.confirm('Remove this rider?')) return;
-    try {
-      await ridersAPI.delete(id);
-      fetchRiders();
-    } catch (err) {
-      alert('Error removing rider');
+    if (window.confirm('Remove this rider?')) {
+      try { await ridersAPI.delete(id); fetchData(); }
+      catch (err) { alert('Error removing rider'); }
     }
   };
 
-  const sendWhatsApp = (rider) => {
-    const phone = rider.phone?.replace(/\D/g, '');
-    window.open(`https://wa.me/${phone}`, '_blank');
+  const handleAssign = async (e) => {
+    e.preventDefault();
+    try {
+      await ridersAPI.assignDelivery(assign);
+      alert('Delivery assigned!');
+      setShowAssign(false);
+      setAssign({ order_id: '', rider_id: '' });
+      fetchData();
+    } catch (err) { alert('Error assigning delivery'); }
   };
 
+  const handleCancel = () => {
+    setShowForm(false);
+    setEditRider(null);
+    setForm({ name: '', phone: '', vehicle_type: '', vehicle_number: '' });
+  };
+
+  if (loading) return <div style={{padding:'24px'}}>Loading...</div>;
+
   return (
-    <div>
-      <div className="page-header">
-        <div>
-          <h1 className="page-title">Riders</h1>
-          <p style={{ color: '#888', fontSize: '13px', margin: '4px 0 0' }}>{total} riders</p>
-        </div>
-        <button className="btn btn-primary" onClick={openAdd}>+ Add Rider</button>
-      </div>
-
-      {/* Search */}
-      <div className="card" style={{ marginBottom: '16px' }}>
-        <div className="search-bar">
-          <input
-            className="search-input"
-            placeholder="🔍 Search riders..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-          {search && (
-            <button className="btn btn-secondary" onClick={() => setSearch('')}>Clear</button>
-          )}
+    <div style={{padding:'24px'}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'24px'}}>
+        <h1 style={{fontSize:'24px',fontWeight:'bold',color:'#1a1a2e',margin:0}}>Riders</h1>
+        <div style={{display:'flex',gap:'8px'}}>
+          <button onClick={() => setShowAssign(!showAssign)} style={{padding:'10px 20px',background:'#f39c12',color:'white',border:'none',borderRadius:'6px',cursor:'pointer',fontSize:'14px'}}>
+            Assign Delivery
+          </button>
+          <button onClick={() => setShowForm(!showForm)} style={{padding:'10px 20px',background:'#1a1a2e',color:'white',border:'none',borderRadius:'6px',cursor:'pointer',fontSize:'14px'}}>
+            {showForm ? 'Cancel' : '+ Add Rider'}
+          </button>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="card">
-        {loading ? (
-          <div className="loading">Loading riders...</div>
-        ) : riders.length === 0 ? (
-          <div className="empty-state">
-            <div style={{ fontSize: '40px', marginBottom: '12px' }}>🏍️</div>
-            <h3>No riders yet</h3>
-            <p>Add your first rider to get started</p>
-            <button className="btn btn-primary" style={{ marginTop: '16px' }} onClick={openAdd}>+ Add Rider</button>
-          </div>
-        ) : (
-          <>
-            <div className="table-wrapper">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Rider</th>
-                    <th>Phone</th>
-                    <th>Vehicle</th>
-                    <th>Plate</th>
-                    <th>Status</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {riders.map(rider => (
-                    <tr key={rider.id}>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <div style={{
-                            width: '32px', height: '32px', borderRadius: '50%',
-                            background: '#e67e22', display: 'flex', alignItems: 'center',
-                            justifyContent: 'center', color: 'white', fontWeight: 'bold', fontSize: '13px', flexShrink: 0,
-                          }}>
-                            {rider.name?.charAt(0).toUpperCase()}
-                          </div>
-                          <span style={{ fontWeight: '600' }}>{rider.name}</span>
-                        </div>
-                      </td>
-                      <td style={{ fontWeight: '500' }}>{rider.phone}</td>
-                      <td style={{ color: '#666', textTransform: 'capitalize' }}>{rider.vehicle_type || '—'}</td>
-                      <td style={{ color: '#666', fontWeight: '500' }}>{rider.vehicle_number || '—'}</td>
-                      <td>
-                        <span style={{
-                          background: rider.is_available ? '#d4edda' : '#f8d7da',
-                          color: rider.is_available ? '#155724' : '#721c24',
-                          padding: '3px 10px', borderRadius: '20px',
-                          fontSize: '11px', fontWeight: '600',
-                        }}>
-                          {rider.is_available ? 'Available' : 'Busy'}
-                        </span>
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <button className="btn btn-success" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={() => sendWhatsApp(rider)} title="WhatsApp">💬</button>
-                          <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => openEdit(rider)}>Edit</button>
-                          <button className="btn btn-danger" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => handleDelete(rider.id)}>Remove</button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            {pages > 1 && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginTop: '20px' }}>
-                <button className="btn btn-secondary" disabled={page === 1} onClick={() => setPage(p => p - 1)}>← Prev</button>
-                <span style={{ fontSize: '13px', color: '#666' }}>Page {page} of {pages}</span>
-                <button className="btn btn-secondary" disabled={page === pages} onClick={() => setPage(p => p + 1)}>Next →</button>
-              </div>
-            )}
-          </>
-        )}
-      </div>
-
-      {/* Modal */}
-      {showModal && (
-        <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
-            <div className="modal-header">
-              <h2 className="modal-title">{editing ? 'Edit Rider' : 'Add Rider'}</h2>
-              <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✕</button>
-            </div>
-
-            <div className="form-group">
-              <label className="form-label">Full Name *</label>
-              <input className="form-input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Kwame Asante" />
-            </div>
-            <div className="form-group">
-              <label className="form-label">Phone Number *</label>
-              <input className="form-input" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="e.g. 0244123456" />
-            </div>
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              <div className="form-group">
-                <label className="form-label">Vehicle Type</label>
-                <select className="form-input" value={form.vehicle_type} onChange={e => setForm(f => ({ ...f, vehicle_type: e.target.value }))}>
-                  <option value="">Select...</option>
-                  <option value="motorcycle">Motorcycle</option>
-                  <option value="bicycle">Bicycle</option>
-                  <option value="car">Car</option>
-                  <option value="tricycle">Tricycle</option>
+      {showAssign && (
+        <div style={{background:'white',padding:'24px',borderRadius:'10px',boxShadow:'0 2px 8px rgba(0,0,0,0.08)',marginBottom:'24px'}}>
+          <h2 style={{fontSize:'18px',fontWeight:'600',marginBottom:'16px'}}>Assign Delivery</h2>
+          <form onSubmit={handleAssign}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'16px'}}>
+              <div>
+                <label style={{display:'block',marginBottom:'6px',fontSize:'14px',fontWeight:'500'}}>Select Order</label>
+                <select value={assign.order_id} onChange={e => setAssign({...assign, order_id: e.target.value})} style={{width:'100%',padding:'8px',border:'1px solid #ddd',borderRadius:'6px'}} required>
+                  <option value="">Select order</option>
+                  {orders.map(o => <option key={o.id} value={o.id}>{o.order_number} - {o.customer_name||'N/A'} - GH{Number(o.total_amount).toFixed(2)}</option>)}
                 </select>
               </div>
-              <div className="form-group">
-                <label className="form-label">Plate / Vehicle #</label>
-                <input className="form-input" value={form.vehicle_number} onChange={e => setForm(f => ({ ...f, vehicle_number: e.target.value }))} placeholder="e.g. GR-1234-21" />
+              <div>
+                <label style={{display:'block',marginBottom:'6px',fontSize:'14px',fontWeight:'500'}}>Select Rider</label>
+                <select value={assign.rider_id} onChange={e => setAssign({...assign, rider_id: e.target.value})} style={{width:'100%',padding:'8px',border:'1px solid #ddd',borderRadius:'6px'}} required>
+                  <option value="">Select rider</option>
+                  {riders.map(r => <option key={r.id} value={r.id}>{r.name} - {r.phone}</option>)}
+                </select>
               </div>
             </div>
-
-            <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowModal(false)}>Cancel</button>
-              <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving...' : editing ? 'Save Changes' : 'Add Rider'}
-              </button>
+            <div style={{display:'flex',gap:'8px',justifyContent:'flex-end'}}>
+              <button type="button" onClick={() => setShowAssign(false)} style={{padding:'10px 20px',background:'#f0f2f5',border:'1px solid #ddd',borderRadius:'6px',cursor:'pointer'}}>Cancel</button>
+              <button type="submit" style={{padding:'10px 24px',background:'#2ecc71',color:'white',border:'none',borderRadius:'6px',cursor:'pointer',fontSize:'14px',fontWeight:'600'}}>Assign</button>
             </div>
-          </div>
+          </form>
         </div>
       )}
+
+      {showForm && (
+        <div style={{background:'white',padding:'24px',borderRadius:'10px',boxShadow:'0 2px 8px rgba(0,0,0,0.08)',marginBottom:'24px'}}>
+          <h2 style={{fontSize:'18px',fontWeight:'600',marginBottom:'16px'}}>{editRider ? 'Edit Rider' : 'Add New Rider'}</h2>
+          <form onSubmit={handleSubmit}>
+            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'16px'}}>
+              <div>
+                <label style={{display:'block',marginBottom:'6px',fontSize:'14px',fontWeight:'500'}}>Full Name</label>
+                <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} style={{width:'100%',padding:'8px',border:'1px solid #ddd',borderRadius:'6px',boxSizing:'border-box'}} placeholder="Enter full name" required />
+              </div>
+              <div>
+                <label style={{display:'block',marginBottom:'6px',fontSize:'14px',fontWeight:'500'}}>Phone Number</label>
+                <input value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} style={{width:'100%',padding:'8px',border:'1px solid #ddd',borderRadius:'6px',boxSizing:'border-box'}} placeholder="e.g. 0244123456" required />
+              </div>
+              <div>
+                <label style={{display:'block',marginBottom:'6px',fontSize:'14px',fontWeight:'500'}}>Vehicle Type</label>
+                <input value={form.vehicle_type} onChange={e => setForm({...form, vehicle_type: e.target.value})} style={{width:'100%',padding:'8px',border:'1px solid #ddd',borderRadius:'6px',boxSizing:'border-box'}} placeholder="e.g. Motorbike, Bicycle" />
+              </div>
+              <div>
+                <label style={{display:'block',marginBottom:'6px',fontSize:'14px',fontWeight:'500'}}>Vehicle Number</label>
+                <input value={form.vehicle_number} onChange={e => setForm({...form, vehicle_number: e.target.value})} style={{width:'100%',padding:'8px',border:'1px solid #ddd',borderRadius:'6px',boxSizing:'border-box'}} placeholder="e.g. GR-1234-22" />
+              </div>
+            </div>
+            <div style={{display:'flex',gap:'8px',justifyContent:'flex-end'}}>
+              <button type="button" onClick={handleCancel} style={{padding:'10px 20px',background:'#f0f2f5',border:'1px solid #ddd',borderRadius:'6px',cursor:'pointer'}}>Cancel</button>
+              <button type="submit" style={{padding:'10px 24px',background:'#2ecc71',color:'white',border:'none',borderRadius:'6px',cursor:'pointer',fontSize:'14px',fontWeight:'600'}}>{editRider ? 'Update Rider' : 'Add Rider'}</button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      <div style={{background:'white',borderRadius:'10px',boxShadow:'0 2px 8px rgba(0,0,0,0.08)',overflow:'hidden'}}>
+        <table style={{width:'100%',borderCollapse:'collapse'}}>
+          <thead>
+            <tr style={{background:'#f8f9fa'}}>
+              <th style={{textAlign:'left',padding:'12px',fontSize:'13px',color:'#666'}}>Name</th>
+              <th style={{textAlign:'left',padding:'12px',fontSize:'13px',color:'#666'}}>Phone</th>
+              <th style={{textAlign:'left',padding:'12px',fontSize:'13px',color:'#666'}}>Vehicle</th>
+              <th style={{textAlign:'left',padding:'12px',fontSize:'13px',color:'#666'}}>Status</th>
+              <th style={{textAlign:'left',padding:'12px',fontSize:'13px',color:'#666'}}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {riders.length === 0
+              ? <tr><td colSpan="5" style={{textAlign:'center',padding:'40px',color:'#999'}}>No riders yet</td></tr>
+              : riders.map(rider => (
+                <tr key={rider.id} style={{borderBottom:'1px solid #f0f0f0'}}>
+                  <td style={{padding:'12px',fontSize:'14px',fontWeight:'500'}}>{rider.name}</td>
+                  <td style={{padding:'12px',fontSize:'14px'}}>{rider.phone}</td>
+                  <td style={{padding:'12px',fontSize:'14px'}}>{rider.vehicle_type||'-'} {rider.vehicle_number ? '('+rider.vehicle_number+')' : ''}</td>
+                  <td style={{padding:'12px'}}>
+                    <span style={{padding:'3px 10px',borderRadius:'20px',color:'white',fontSize:'12px',background: rider.is_available ? '#2ecc71' : '#e74c3c'}}>
+                      {rider.is_available ? 'Available' : 'Busy'}
+                    </span>
+                  </td>
+                  <td style={{padding:'12px',display:'flex',gap:'4px'}}>
+                    <button onClick={() => window.open('https://wa.me/'+rider.phone.replace(/[^0-9]/g,''), '_blank')} style={{padding:'4px 12px',background:'#25D366',color:'white',border:'none',borderRadius:'4px',cursor:'pointer',fontSize:'12px'}}>WhatsApp</button>
+                    <button onClick={() => handleEdit(rider)} style={{padding:'4px 12px',background:'#3498db',color:'white',border:'none',borderRadius:'4px',cursor:'pointer',fontSize:'12px'}}>Edit</button>
+                    <button onClick={() => handleDelete(rider.id)} style={{padding:'4px 12px',background:'#e74c3c',color:'white',border:'none',borderRadius:'4px',cursor:'pointer',fontSize:'12px'}}>Remove</button>
+                  </td>
+                </tr>
+              ))
+            }
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 };
 
 export default Riders;
+
