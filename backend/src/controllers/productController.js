@@ -1,14 +1,41 @@
+const { body } = require('express-validator');
 const pool = require('../config/db');
+
+const createProductValidation = [
+  body('name').notEmpty().withMessage('Product name is required'),
+  body('price').isFloat({ min: 0 }).withMessage('Price must be a positive number'),
+  body('stock_quantity').optional().isInt({ min: 0 }).withMessage('Stock must be a positive number'),
+];
 
 const getProducts = async (req, res) => {
   try {
+    const { search, category, page = 1, limit = 20 } = req.query;
+    const offset = (page - 1) * limit;
+    const conditions = ['is_active = true'];
+    const values = [];
+    let i = 1;
+
+    if (search) {
+      conditions.push(`(name ILIKE $${i} OR description ILIKE $${i} OR category ILIKE $${i})`);
+      values.push(`%${search}%`); i++;
+    }
+    if (category) { conditions.push(`category = $${i++}`); values.push(category); }
+
+    const where = `WHERE ${conditions.join(' AND ')}`;
+
+    const countResult = await pool.query(`SELECT COUNT(*) FROM products ${where}`, values);
     const result = await pool.query(
-      'SELECT * FROM products WHERE is_active = true ORDER BY created_at DESC'
+      `SELECT * FROM products ${where} ORDER BY created_at DESC LIMIT $${i} OFFSET $${i + 1}`,
+      [...values, limit, offset]
     );
+
     res.json({
       success: true,
       count: result.rows.length,
-      products: result.rows
+      total: parseInt(countResult.rows[0].count),
+      page: parseInt(page),
+      pages: Math.ceil(parseInt(countResult.rows[0].count) / limit),
+      products: result.rows,
     });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error' });
@@ -18,10 +45,7 @@ const getProducts = async (req, res) => {
 const getProduct = async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query(
-      'SELECT * FROM products WHERE id = $1 AND is_active = true',
-      [id]
-    );
+    const result = await pool.query('SELECT * FROM products WHERE id = $1 AND is_active = true', [id]);
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
@@ -34,9 +58,6 @@ const getProduct = async (req, res) => {
 const createProduct = async (req, res) => {
   try {
     const { name, description, price, stock_quantity, low_stock_threshold, category, image_url } = req.body;
-    if (!name || !price) {
-      return res.status(400).json({ success: false, message: 'Name and price are required' });
-    }
     const result = await pool.query(
       `INSERT INTO products (name, description, price, stock_quantity, low_stock_threshold, category, image_url)
        VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
@@ -70,10 +91,7 @@ const updateProduct = async (req, res) => {
 const deleteProduct = async (req, res) => {
   try {
     const { id } = req.params;
-    await pool.query(
-      'UPDATE products SET is_active = false, updated_at = NOW() WHERE id = $1',
-      [id]
-    );
+    await pool.query('UPDATE products SET is_active = false, updated_at = NOW() WHERE id = $1', [id]);
     res.json({ success: true, message: 'Product deleted' });
   } catch (error) {
     res.status(500).json({ success: false, message: 'Server error' });
@@ -94,4 +112,69 @@ const updateStock = async (req, res) => {
   }
 };
 
-module.exports = { getProducts, getProduct, createProduct, updateProduct, deleteProduct, updateStock };
+// Bulk CSV import — expects array of products
+const bulkImport = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { products } = req.body;
+    if (!products || !Array.isArray(products) || products.length === 0) {
+      return res.status(400).json({ success: false, message: 'No products provided' });
+    }
+    if (products.length > 1000) {
+      return res.status(400).json({ success: false, message: 'Maximum 1000 products per import' });
+    }
+
+    await client.query('BEGIN');
+
+    let imported = 0;
+    let skipped = 0;
+    const errors = [];
+
+    for (const [index, product] of products.entries()) {
+      if (!product.name || !product.price) {
+        errors.push(`Row ${index + 1}: name and price are required`);
+        skipped++;
+        continue;
+      }
+      if (isNaN(parseFloat(product.price)) || parseFloat(product.price) < 0) {
+        errors.push(`Row ${index + 1}: invalid price for "${product.name}"`);
+        skipped++;
+        continue;
+      }
+
+      await client.query(
+        `INSERT INTO products (name, description, price, stock_quantity, low_stock_threshold, category, image_url)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT DO NOTHING`,
+        [
+          product.name.trim(),
+          product.description || null,
+          parseFloat(product.price),
+          parseInt(product.stock_quantity) || 0,
+          parseInt(product.low_stock_threshold) || 5,
+          product.category || null,
+          product.image_url || null,
+        ]
+      );
+      imported++;
+    }
+
+    await client.query('COMMIT');
+
+    res.json({
+      success: true,
+      message: `Import complete — ${imported} imported, ${skipped} skipped`,
+      imported,
+      skipped,
+      errors: errors.slice(0, 10),
+    });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('bulkImport error:', error);
+    res.status(500).json({ success: false, message: 'Server error during import' });
+  } finally {
+    client.release();
+  }
+};
+
+module.exports = { getProducts, getProduct, createProduct, updateProduct, deleteProduct, updateStock, bulkImport, createProductValidation };

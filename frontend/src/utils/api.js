@@ -62,6 +62,7 @@ export const productsAPI = {
   update: (id, data) => API.put(`/products/${id}`, data),
   delete: (id) => API.delete(`/products/${id}`),
   updateStock: (id, data) => API.patch(`/products/${id}/stock`, data),
+  bulkImport: (data) => API.post("/products/bulk-import", data),
 };
 
 export const customersAPI = {

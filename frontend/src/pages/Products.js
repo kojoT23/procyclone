@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { productsAPI } from '../utils/api';
 
 const Products = () => {
@@ -11,6 +11,9 @@ const Products = () => {
   const [showModal, setShowModal] = useState(false);
   const [editing, setEditing] = useState(null);
   const [saving, setSaving] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState(null);
+  const fileInputRef = useRef();
   const [form, setForm] = useState({
     name: '', description: '', price: '', stock_quantity: '',
     low_stock_threshold: '5', category: '', image_url: '',
@@ -83,6 +86,62 @@ const Products = () => {
     }
   };
 
+  const handleCSVImport = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        setImporting(true);
+        setImportResult(null);
+        const text = event.target.result;
+        const lines = text.split('\n').filter(l => l.trim());
+        const headers = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/"/g, ''));
+
+        const products = [];
+        for (let i = 1; i < lines.length; i++) {
+          const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
+          if (values.length < 2) continue;
+          const product = {};
+          headers.forEach((header, index) => {
+            product[header] = values[index] || '';
+          });
+          if (product.name) products.push(product);
+        }
+
+        if (products.length === 0) {
+          alert('No valid products found in CSV');
+          return;
+        }
+
+        const res = await productsAPI.bulkImport({ products });
+        setImportResult(res.data);
+        fetchProducts();
+      } catch (err) {
+        alert(err.response?.data?.message || 'Import failed');
+      } finally {
+        setImporting(false);
+        fileInputRef.current.value = '';
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const downloadTemplate = () => {
+    const csv = `name,description,price,stock_quantity,low_stock_threshold,category
+Mountain Bike Helmet,Premium safety helmet,150.00,20,5,Helmets
+Road Bike Gloves,Padded cycling gloves,45.00,50,10,Accessories
+Water Bottle,750ml cycling bottle,25.00,100,20,Accessories`;
+    const blob = new Blob([csv], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'procyclone_products_template.csv';
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const stockColor = (qty, threshold) => {
     if (qty === 0) return '#e74c3c';
     if (qty <= threshold) return '#f39c12';
@@ -96,8 +155,43 @@ const Products = () => {
           <h1 className="page-title">Products</h1>
           <p style={{ color: '#888', fontSize: '13px', margin: '4px 0 0' }}>{total} products in inventory</p>
         </div>
-        <button className="btn btn-primary" onClick={openAdd}>+ Add Product</button>
+        <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+          <button className="btn btn-secondary" onClick={downloadTemplate} style={{ fontSize: '12px' }}>
+            📥 CSV Template
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={() => fileInputRef.current.click()}
+            disabled={importing}
+            style={{ fontSize: '12px' }}
+          >
+            {importing ? '⏳ Importing...' : '📤 Import CSV'}
+          </button>
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv"
+            style={{ display: 'none' }}
+            onChange={handleCSVImport}
+          />
+          <button className="btn btn-primary" onClick={openAdd}>+ Add Product</button>
+        </div>
       </div>
+
+      {/* Import result banner */}
+      {importResult && (
+        <div style={{
+          background: '#d4edda', border: '1px solid #c3e6cb',
+          borderRadius: '8px', padding: '12px 16px', marginBottom: '16px',
+          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+        }}>
+          <span style={{ color: '#155724', fontSize: '14px' }}>
+            ✅ {importResult.message}
+            {importResult.errors?.length > 0 && ` — ${importResult.errors.length} errors`}
+          </span>
+          <button onClick={() => setImportResult(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+        </div>
+      )}
 
       {/* Search */}
       <div className="card" style={{ marginBottom: '16px' }}>
@@ -120,10 +214,13 @@ const Products = () => {
           <div className="loading">Loading products...</div>
         ) : products.length === 0 ? (
           <div className="empty-state">
-            <div style={{ fontSize: '40px', marginBottom: '12px' }}>📦</div>
+            <div style={{ fontSize: '40px', marginBottom: '12px' }}>��</div>
             <h3>No products yet</h3>
-            <p>Add your first product to get started</p>
-            <button className="btn btn-primary" style={{ marginTop: '16px' }} onClick={openAdd}>+ Add Product</button>
+            <p>Add products manually or import from CSV</p>
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '16px' }}>
+              <button className="btn btn-secondary" onClick={downloadTemplate}>📥 Get Template</button>
+              <button className="btn btn-primary" onClick={openAdd}>+ Add Product</button>
+            </div>
           </div>
         ) : (
           <>
