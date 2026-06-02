@@ -98,4 +98,12 @@ export const cashAPI = {
   getReconciliation: (params) => API.get('/cash/reconciliation', { params }),
 };
 
+export const paymentsAPI = {
+  getAll: (params) => API.get('/payments', { params }),
+  create: (data) => API.post('/payments', data),
+  verify: (id, data) => API.put(`/payments/${id}/verify`, data),
+  fail: (id) => API.put(`/payments/${id}/fail`),
+  getSummary: (params) => API.get('/payments/summary', { params }),
+};
+
 export default API;
