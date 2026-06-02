@@ -21,6 +21,7 @@ const Sidebar = ({ isOpen, onClose }) => {
     { to: '/users', label: 'Staff', icon: '👤', permission: 'manage_users' },
     { to: '/inventory', label: 'Inventory', icon: '🏭', permission: 'manage_products' },
     { to: '/payments', label: 'Payments', icon: '💳', permission: 'manage_cash' },
+    { to: '/reports', label: 'Reports', icon: '📊', permission: 'view_reports' },
   ];
 
   const links = allLinks.filter(link =>

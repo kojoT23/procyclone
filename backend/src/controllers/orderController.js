@@ -126,7 +126,12 @@ const createOrder = async (req, res) => {
         [item.quantity, item.product_id]
       );
     }
-
+// Auto-create payment record
+   await client.query(
+     `INSERT INTO payments (order_id, method, amount)
+      VALUES ($1, $2, $3)`,
+    [orderId, payment_method, total]
+);
     await client.query('COMMIT');
     res.status(201).json({ success: true, message: 'Order created', order: order.rows[0] });
   } catch (error) {
