@@ -94,6 +94,8 @@ export const cashAPI = {
   create: (data) => API.post('/cash', data),
   verify: (id) => API.put(`/cash/${id}/verify`),
   getDailyReport: () => API.get('/cash/report/daily'),
+  dispute: (id, data) => API.put(`/cash/${id}/dispute`, data),
+  getReconciliation: (params) => API.get('/cash/reconciliation', { params }),
 };
 
 export default API;
