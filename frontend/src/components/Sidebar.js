@@ -20,6 +20,7 @@ const Sidebar = ({ isOpen, onClose }) => {
     { to: '/cash', label: 'Cash Control', icon: '💰', permission: 'manage_cash' },
     { to: '/users', label: 'Staff', icon: '👤', permission: 'manage_users' },
     { to: '/inventory', label: 'Inventory', icon: '🏭', permission: 'manage_products' },
+    { to: '/payments', label: 'Payments', icon: '💳', permission: 'manage_cash' },
   ];
 
   const links = allLinks.filter(link =>
