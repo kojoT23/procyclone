@@ -21,6 +21,7 @@ app.use('/api/users',     require('./routes/userRoutes'));
 app.use('/api/password',  require('./routes/passwordResetRoutes'));
 app.use('/api/inventory', require('./routes/inventoryRoutes'));
 app.use('/api/payments', require('./routes/paymentRoutes'));
+app.use('/api/reports', require('./routes/reportRoutes'));
 app.get('/', (req, res) => { res.json({ success: true, message: 'Pro Cyclone API is running 🚀', version: '1.0.0' }); });
 app.get('/health', async (req, res) => { try { await pool.query('SELECT NOW()'); res.json({ success: true, message: 'Server and database are healthy ✅' }); } catch (error) { res.status(500).json({ success: false, message: 'Database connection failed ❌' }); } });
 process.on('uncaughtException', (err) => { console.error('Uncaught Exception:', err); });

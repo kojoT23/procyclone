@@ -1,6 +1,7 @@
 import Staff from './pages/Staff';
 import Inventory from './pages/Inventory';
 import Payments from './pages/Payments';
+import Reports from './pages/Reports';
 import React from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
@@ -31,6 +32,7 @@ function App() {
           <Route path="/users" element={<PrivateRoute><Layout><Staff /></Layout></PrivateRoute>} />
           <Route path="/inventory" element={<PrivateRoute><Layout><Inventory /></Layout></PrivateRoute>} />
           <Route path="/payments" element={<PrivateRoute><Layout><Payments /></Layout></PrivateRoute>} />
+          <Route path="/reports" element={<PrivateRoute><Layout><Reports /></Layout></PrivateRoute>} />
           <Route path="/login" element={<Login />} />
           <Route path="/" element={<PrivateRoute><Layout><Dashboard /></Layout></PrivateRoute>} />
           <Route path="/orders" element={<PrivateRoute><Layout><Orders /></Layout></PrivateRoute>} />
