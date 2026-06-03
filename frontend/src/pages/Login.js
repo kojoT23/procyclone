@@ -18,63 +18,116 @@ const Login = () => {
       await login(email, password);
       navigate('/');
     } catch (err) {
-      setError('Invalid email or password');
+      setError(err.response?.data?.message || 'Invalid email or password');
     } finally {
       setLoading(false);
     }
   };
 
   return (
-    <div style={styles.container}>
-      <div style={styles.card}>
-        <div style={styles.header}>
-          <h1 style={styles.title}>Pro Cyclone</h1>
-          <p style={styles.subtitle}>Business Dashboard</p>
+    <div style={{
+      minHeight: '100vh',
+      background: 'linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      padding: '20px', fontFamily: 'var(--font)',
+    }}>
+      {/* Background pattern */}
+      <div style={{
+        position: 'fixed', inset: 0, opacity: 0.03,
+        backgroundImage: 'radial-gradient(circle, #ffffff 1px, transparent 1px)',
+        backgroundSize: '32px 32px',
+        pointerEvents: 'none',
+      }} />
+
+      <div style={{ width: '100%', maxWidth: '420px', position: 'relative' }}>
+        {/* Logo */}
+        <div style={{ textAlign: 'center', marginBottom: '32px' }}>
+          <div style={{
+            width: '56px', height: '56px', borderRadius: '16px',
+            background: 'linear-gradient(135deg, #22c55e, #16a34a)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '26px', margin: '0 auto 16px', boxShadow: '0 8px 24px rgba(34,197,94,0.3)',
+          }}>🚲</div>
+          <h1 style={{ color: 'white', fontSize: '24px', fontWeight: '700', margin: '0 0 6px', letterSpacing: '-0.5px' }}>
+            ProCyclone
+          </h1>
+          <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '13px', margin: 0 }}>
+            Sign in to your dashboard
+          </p>
         </div>
-        {error && <div style={styles.error}>{error}</div>}
-        <form onSubmit={handleSubmit}>
-          <div style={styles.field}>
-            <label style={styles.label}>Email</label>
-            <input
-              style={styles.input}
-              type="email"
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-              placeholder="admin@procyclone.com"
-              required
-            />
-          </div>
-          <div style={styles.field}>
-            <label style={styles.label}>Password</label>
-            <input
-              style={styles.input}
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              placeholder="Enter password"
-              required
-            />
-          </div>
-          <button style={styles.button} type="submit" disabled={loading}>
-            {loading ? 'Logging in...' : 'Login'}
-          </button>
-        </form>
+
+        {/* Card */}
+        <div style={{
+          background: 'white', borderRadius: '20px',
+          padding: '32px', boxShadow: '0 24px 60px rgba(0,0,0,0.4)',
+        }}>
+          {error && (
+            <div style={{
+              background: '#fef2f2', border: '1px solid #fecaca',
+              borderRadius: '8px', padding: '12px 14px',
+              color: '#dc2626', fontSize: '13px', marginBottom: '20px',
+              display: 'flex', alignItems: 'center', gap: '8px',
+            }}>
+              ⚠️ {error}
+            </div>
+          )}
+
+          <form onSubmit={handleSubmit}>
+            <div className="form-group">
+              <label className="form-label">Email address</label>
+              <input
+                className="form-input"
+                type="email"
+                value={email}
+                onChange={e => setEmail(e.target.value)}
+                placeholder="you@procyclone.com"
+                required
+                autoFocus
+              />
+            </div>
+
+            <div className="form-group" style={{ marginBottom: '24px' }}>
+              <label className="form-label">Password</label>
+              <input
+                className="form-input"
+                type="password"
+                value={password}
+                onChange={e => setPassword(e.target.value)}
+                placeholder="••••••••"
+                required
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={loading}
+              style={{
+                width: '100%', padding: '13px',
+                background: loading ? '#94a3b8' : 'linear-gradient(135deg, #0f172a, #1e293b)',
+                color: 'white', border: 'none', borderRadius: '10px',
+                fontSize: '14px', fontWeight: '700', cursor: loading ? 'not-allowed' : 'pointer',
+                fontFamily: 'var(--font)', letterSpacing: '0.2px',
+                transition: 'all 0.15s', boxShadow: '0 4px 12px rgba(15,23,42,0.3)',
+              }}
+            >
+              {loading ? 'Signing in...' : 'Sign in →'}
+            </button>
+          </form>
+
+          <p style={{ textAlign: 'center', marginTop: '20px', fontSize: '12px', color: '#94a3b8' }}>
+            Forgot your password?{' '}
+            <a href="/reset-password" style={{ color: '#0f172a', fontWeight: '600', textDecoration: 'none' }}>
+              Reset it
+            </a>
+          </p>
+        </div>
+
+        <p style={{ textAlign: 'center', marginTop: '24px', color: 'rgba(255,255,255,0.2)', fontSize: '12px' }}>
+          © 2024 ProCyclone — Ghana
+        </p>
       </div>
     </div>
   );
-};
-
-const styles = {
-  container: { minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', background: '#f0f2f5' },
-  card: { background: 'white', padding: '40px', borderRadius: '12px', boxShadow: '0 4px 20px rgba(0,0,0,0.1)', width: '100%', maxWidth: '400px' },
-  header: { textAlign: 'center', marginBottom: '30px' },
-  title: { fontSize: '28px', fontWeight: 'bold', color: '#1a1a2e', margin: '0 0 8px' },
-  subtitle: { color: '#666', margin: 0 },
-  error: { background: '#fee', color: '#c00', padding: '10px', borderRadius: '6px', marginBottom: '16px', fontSize: '14px' },
-  field: { marginBottom: '16px' },
-  label: { display: 'block', marginBottom: '6px', fontWeight: '500', color: '#333', fontSize: '14px' },
-  input: { width: '100%', padding: '10px 12px', border: '1px solid #ddd', borderRadius: '6px', fontSize: '14px', boxSizing: 'border-box', outline: 'none' },
-  button: { width: '100%', padding: '12px', background: '#1a1a2e', color: 'white', border: 'none', borderRadius: '6px', fontSize: '16px', fontWeight: '600', cursor: 'pointer', marginTop: '8px' },
 };
 
 export default Login;

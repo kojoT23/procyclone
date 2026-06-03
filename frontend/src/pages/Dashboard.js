@@ -1,53 +1,28 @@
 import React, { useState, useEffect } from 'react';
-import { ordersAPI, productsAPI, ridersAPI, cashAPI } from '../utils/api';
+import { ordersAPI, productsAPI, ridersAPI } from '../utils/api';
 
-const StatCard = ({ title, value, icon, color, sub }) => (
-  <div className="card" style={{ borderTop: `4px solid ${color}`, display: 'flex', flexDirection: 'column', gap: '8px' }}>
-    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-      <p style={{ color: '#888', fontSize: '12px', fontWeight: '600', textTransform: 'uppercase', letterSpacing: '0.5px', margin: 0 }}>{title}</p>
-      <span style={{ fontSize: '22px' }}>{icon}</span>
-    </div>
-    <h3 style={{ fontSize: '28px', fontWeight: '700', color: '#1a1a2e', margin: 0 }}>{value}</h3>
-    {sub && <p style={{ color: '#aaa', fontSize: '12px', margin: 0 }}>{sub}</p>}
+const STATUS_COLORS = {
+  pending:          { bg: '#fef3c7', text: '#d97706' },
+  confirmed:        { bg: '#dbeafe', text: '#1d4ed8' },
+  packing:          { bg: '#ede9fe', text: '#7c3aed' },
+  assigned:         { bg: '#ccfbf1', text: '#0f766e' },
+  out_for_delivery: { bg: '#fed7aa', text: '#c2410c' },
+  delivered:        { bg: '#dcfce7', text: '#16a34a' },
+  failed:           { bg: '#fee2e2', text: '#dc2626' },
+  returned:         { bg: '#f1f5f9', text: '#475569' },
+};
+
+const StatCard = ({ label, value, sub, icon, color }) => (
+  <div className="stat-card" style={{ '--accent-color': color }}>
+    <div className="stat-icon">{icon}</div>
+    <p className="stat-label">{label}</p>
+    <p className="stat-value">{value}</p>
+    {sub && <p className="stat-sub">{sub}</p>}
   </div>
 );
 
-const OrderRow = ({ order }) => {
-  const statusColors = {
-    pending: '#fff3cd', confirmed: '#cce5ff', packing: '#d4edda',
-    assigned: '#e2d9f3', out_for_delivery: '#ffd6a5',
-    delivered: '#d4edda', failed: '#f8d7da', returned: '#e2e3e5',
-  };
-  const statusText = {
-    pending: '#856404', confirmed: '#004085', packing: '#155724',
-    assigned: '#4a235a', out_for_delivery: '#7d4e00',
-    delivered: '#155724', failed: '#721c24', returned: '#383d41',
-  };
-
-  return (
-    <tr>
-      <td style={{ fontWeight: '600', color: '#1a1a2e' }}>{order.order_number}</td>
-      <td>{order.customer_name || '—'}</td>
-      <td>
-        <span style={{
-          background: statusColors[order.status] || '#eee',
-          color: statusText[order.status] || '#333',
-          padding: '3px 10px', borderRadius: '20px',
-          fontSize: '11px', fontWeight: '600', textTransform: 'capitalize',
-        }}>
-          {order.status?.replace('_', ' ')}
-        </span>
-      </td>
-      <td style={{ fontWeight: '600' }}>GH₵ {parseFloat(order.total_amount || 0).toFixed(2)}</td>
-      <td style={{ color: '#888', fontSize: '12px' }}>
-        {new Date(order.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-      </td>
-    </tr>
-  );
-};
-
 const Dashboard = () => {
-  const [stats, setStats] = useState({ orders: 0, products: 0, riders: 0, revenue: 0, pending: 0, delivered: 0 });
+  const [stats, setStats] = useState({ orders: 0, products: 0, riders: 0, revenue: '0.00', pending: 0, delivered: 0 });
   const [recentOrders, setRecentOrders] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -58,12 +33,10 @@ const Dashboard = () => {
         productsAPI.getAll({ limit: 1 }),
         ridersAPI.getAll({ limit: 1 }),
       ]);
-
       const allOrders = orders.data.orders || [];
       const revenue = allOrders
         .filter(o => o.status === 'delivered')
         .reduce((sum, o) => sum + parseFloat(o.total_amount || 0), 0);
-
       setStats({
         orders: orders.data.total || 0,
         products: products.data.total || 0,
@@ -72,10 +45,9 @@ const Dashboard = () => {
         pending: allOrders.filter(o => o.status === 'pending').length,
         delivered: allOrders.filter(o => o.status === 'delivered').length,
       });
-
       setRecentOrders(allOrders.slice(0, 8));
-    } catch (error) {
-      console.error(error);
+    } catch (err) {
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -88,46 +60,42 @@ const Dashboard = () => {
   }, []);
 
   if (loading) return (
-    <div className="loading">
-      <div>
-        <div style={{ fontSize: '32px', textAlign: 'center', marginBottom: '12px' }}>⚡</div>
-        <p>Loading dashboard...</p>
+    <div style={{ padding: '32px' }}>
+      <div className="loading">
+        <div className="loading-spinner" />
+        <p className="loading-text">Loading dashboard...</p>
       </div>
     </div>
   );
 
   return (
-    <div>
-      {/* Header */}
+    <div style={{ padding: '32px 32px 48px', maxWidth: '1200px' }}>
       <div className="page-header">
         <div>
           <h1 className="page-title">Overview</h1>
-          <p style={{ color: '#888', fontSize: '13px', margin: '4px 0 0' }}>
+          <p className="page-subtitle">
             {new Date().toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
           </p>
         </div>
-        <button onClick={fetchData} className="btn btn-secondary" style={{ fontSize: '12px' }}>
-          🔄 Refresh
-        </button>
+        <button onClick={fetchData} className="btn btn-secondary">↻ Refresh</button>
       </div>
 
-      {/* Stats */}
       <div className="stats-grid">
-        <StatCard title="Total Orders" value={stats.orders} icon="🛍️" color="#3498db" sub={`${stats.pending} pending`} />
-        <StatCard title="Revenue" value={`GH₵ ${stats.revenue}`} icon="💰" color="#2ecc71" sub="From delivered orders" />
-        <StatCard title="Products" value={stats.products} icon="📦" color="#9b59b6" sub="In inventory" />
-        <StatCard title="Riders" value={stats.riders} icon="🏍️" color="#e67e22" sub={`${stats.delivered} delivered`} />
+        <StatCard label="Total Orders" value={stats.orders} sub={`${stats.pending} pending`} icon="🛍️" color="#3b82f6" />
+        <StatCard label="Revenue" value={`GH₵ ${stats.revenue}`} sub="From delivered orders" icon="💰" color="#22c55e" />
+        <StatCard label="Products" value={stats.products} sub="In inventory" icon="📦" color="#8b5cf6" />
+        <StatCard label="Riders" value={stats.riders} sub={`${stats.delivered} delivered`} icon="🏍️" color="#f59e0b" />
       </div>
 
-      {/* Recent orders */}
       <div className="card">
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-          <h2 style={{ fontSize: '16px', fontWeight: '600', margin: 0 }}>Recent Orders</h2>
-          <a href="/orders" style={{ fontSize: '13px', color: '#3498db', textDecoration: 'none' }}>View all →</a>
+        <div className="card-header">
+          <p className="card-title">Recent Orders</p>
+          <a href="/orders" style={{ fontSize: '13px', color: 'var(--blue)', textDecoration: 'none', fontWeight: '600' }}>View all →</a>
         </div>
 
         {recentOrders.length === 0 ? (
           <div className="empty-state">
+            <div className="empty-icon">🛍️</div>
             <h3>No orders yet</h3>
             <p>Orders will appear here once created</p>
           </div>
@@ -136,7 +104,7 @@ const Dashboard = () => {
             <table>
               <thead>
                 <tr>
-                  <th>Order #</th>
+                  <th>Order</th>
                   <th>Customer</th>
                   <th>Status</th>
                   <th>Amount</th>
@@ -145,7 +113,30 @@ const Dashboard = () => {
               </thead>
               <tbody>
                 {recentOrders.map(order => (
-                  <OrderRow key={order.id} order={order} />
+                  <tr key={order.id}>
+                    <td>
+                      <span style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: '600', color: 'var(--navy)' }}>
+                        {order.order_number}
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ fontWeight: '600' }}>{order.customer_name || '—'}</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-3)' }}>{order.customer_phone}</div>
+                    </td>
+                    <td>
+                      <span className="badge" style={{ background: STATUS_COLORS[order.status]?.bg, color: STATUS_COLORS[order.status]?.text }}>
+                        {order.status?.replace(/_/g, ' ')}
+                      </span>
+                    </td>
+                    <td>
+                      <span style={{ fontWeight: '700', color: 'var(--accent-dim)' }}>
+                        GH₵ {parseFloat(order.total_amount || 0).toFixed(2)}
+                      </span>
+                    </td>
+                    <td style={{ color: 'var(--text-3)', fontSize: '12px' }}>
+                      {new Date(order.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                    </td>
+                  </tr>
                 ))}
               </tbody>
             </table>

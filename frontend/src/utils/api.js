@@ -70,6 +70,7 @@ export const customersAPI = {
   getOne: (id) => API.get(`/customers/${id}`),
   create: (data) => API.post('/customers', data),
   update: (id, data) => API.put(`/customers/${id}`, data),
+  delete: (id) => API.delete(`/customers/${id}`),
 };
 
 export const ordersAPI = {
@@ -77,6 +78,9 @@ export const ordersAPI = {
   getOne: (id) => API.get(`/orders/${id}`),
   create: (data) => API.post('/orders', data),
   updateStatus: (id, data) => API.put(`/orders/${id}/status`, data),
+  delete: (id) => API.delete(`/orders/${id}`),
+  delete: (id) => API.delete(`/orders/${id}`),
+  delete: (id) => API.delete(`/orders/${id}`),
 };
 
 export const ridersAPI = {
