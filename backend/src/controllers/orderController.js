@@ -108,9 +108,9 @@ const createOrder = async (req, res) => {
     const total = items.reduce((sum, item) => sum + item.unit_price * item.quantity, 0);
 
     const order = await client.query(
-      `INSERT INTO orders (order_number, customer_id, payment_method, total_amount, delivery_address, notes, created_by)
-       VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING *`,
-      [generateOrderNumber(), customer_id, payment_method, total, delivery_address, notes, req.user?.id]
+      `INSERT INTO orders (order_number, customer_id, payment_method, total_amount, delivery_address, notes)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [generateOrderNumber(), customer_id, payment_method, total, delivery_address, notes]
     );
 
     const orderId = order.rows[0].id;

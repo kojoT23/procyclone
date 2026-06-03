@@ -1,6 +1,5 @@
-
 import React, { useState, useEffect, useCallback } from 'react';
-import { ordersAPI } from '../utils/api';
+import { ordersAPI, customersAPI, productsAPI } from '../utils/api';
 
 const STATUS_COLORS = {
   pending:          { bg: '#fef3c7', text: '#d97706' },
@@ -34,6 +33,21 @@ const Orders = () => {
   const [deleting, setDeleting] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
 
+  // Create order state
+  const [showCreate, setShowCreate] = useState(false);
+  const [customers, setCustomers] = useState([]);
+  const [products, setProducts] = useState([]);
+  const [saving, setSaving] = useState(false);
+  const [orderForm, setOrderForm] = useState({
+    customer_id: '',
+    payment_method: 'cash',
+    delivery_address: '',
+    notes: '',
+    items: [],
+  });
+  const [selectedProduct, setSelectedProduct] = useState('');
+  const [selectedQty, setSelectedQty] = useState(1);
+
   const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
@@ -54,6 +68,93 @@ const Orders = () => {
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
   useEffect(() => { setPage(1); }, [search, filterStatus, filterPayment]);
+
+  const openCreate = async () => {
+    try {
+      const [custRes, prodRes] = await Promise.all([
+        customersAPI.getAll({ limit: 100 }),
+        productsAPI.getAll({ limit: 100 }),
+      ]);
+      setCustomers(custRes.data.customers || []);
+      setProducts(prodRes.data.products?.filter(p => p.stock_quantity > 0) || []);
+      setOrderForm({ customer_id: '', payment_method: 'cash', delivery_address: '', notes: '', items: [] });
+      setSelectedProduct('');
+      setSelectedQty(1);
+      setShowCreate(true);
+    } catch (err) {
+      console.error(err);
+    }
+  };
+
+  const addItem = () => {
+    if (!selectedProduct) return;
+    const product = products.find(p => p.id === parseInt(selectedProduct));
+    if (!product) return;
+
+    const existing = orderForm.items.find(i => i.product_id === product.id);
+    if (existing) {
+      setOrderForm(f => ({
+        ...f,
+        items: f.items.map(i => i.product_id === product.id
+          ? { ...i, quantity: i.quantity + selectedQty }
+          : i
+        ),
+      }));
+    } else {
+      setOrderForm(f => ({
+        ...f,
+        items: [...f.items, {
+          product_id: product.id,
+          name: product.name,
+          quantity: selectedQty,
+          unit_price: parseFloat(product.price),
+        }],
+      }));
+    }
+    setSelectedProduct('');
+    setSelectedQty(1);
+  };
+
+  const removeItem = (product_id) => {
+    setOrderForm(f => ({ ...f, items: f.items.filter(i => i.product_id !== product_id) }));
+  };
+
+  const updateItemQty = (product_id, qty) => {
+    if (qty < 1) return removeItem(product_id);
+    setOrderForm(f => ({
+      ...f,
+      items: f.items.map(i => i.product_id === product_id ? { ...i, quantity: qty } : i),
+    }));
+  };
+
+  const orderTotal = orderForm.items.reduce((sum, i) => sum + i.unit_price * i.quantity, 0);
+
+  const handleCreateOrder = async () => {
+    if (!orderForm.customer_id) return alert('Please select a customer');
+    if (orderForm.items.length === 0) return alert('Please add at least one product');
+    if (!orderForm.delivery_address) return alert('Please enter a delivery address');
+
+    try {
+      setSaving(true);
+      await ordersAPI.create({
+        customer_id: parseInt(orderForm.customer_id),
+        payment_method: orderForm.payment_method,
+        delivery_address: orderForm.delivery_address,
+        notes: orderForm.notes,
+        items: orderForm.items.map(i => ({
+          product_id: i.product_id,
+          quantity: i.quantity,
+          unit_price: i.unit_price,
+        })),
+      });
+      setShowCreate(false);
+      fetchOrders();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error creating order');
+    } finally {
+      setSaving(false);
+    }
+  };
 
   const updateStatus = async (orderId, status) => {
     try {
@@ -96,6 +197,7 @@ const Orders = () => {
           <h1 className="page-title">Orders</h1>
           <p className="page-subtitle">{total} total orders</p>
         </div>
+        <button className="btn btn-primary" onClick={openCreate}>+ New Order</button>
       </div>
 
       {/* Search + filters */}
@@ -133,7 +235,8 @@ const Orders = () => {
           <div className="empty-state">
             <div className="empty-icon">🛍️</div>
             <h3>No orders found</h3>
-            <p>Try adjusting your search or filters</p>
+            <p>Create your first order or adjust your filters</p>
+            <button className="btn btn-primary" style={{ marginTop: '4px' }} onClick={openCreate}>+ New Order</button>
           </div>
         ) : (
           <>
@@ -195,21 +298,10 @@ const Orders = () => {
                           >
                             {STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
                           </select>
-                          <button
-                            className="btn btn-success btn-sm"
-                            style={{ padding: '6px 10px' }}
-                            onClick={() => sendWhatsApp(order)}
-                            data-tip="Send WhatsApp update"
-                          >
+                          <button className="btn btn-success btn-sm" style={{ padding: '6px 10px' }} onClick={() => sendWhatsApp(order)}>
                             <WhatsAppIcon />
                           </button>
-                          <button
-                            className="btn btn-danger btn-sm"
-                            style={{ padding: '6px 10px' }}
-                            onClick={() => handleDelete(order)}
-                            disabled={deleting === order.id}
-                            data-tip="Delete order"
-                          >
+                          <button className="btn btn-danger btn-sm" style={{ padding: '6px 10px' }} onClick={() => handleDelete(order)} disabled={deleting === order.id}>
                             🗑
                           </button>
                         </div>
@@ -239,7 +331,6 @@ const Orders = () => {
               <h2 className="modal-title" style={{ fontFamily: 'var(--font-mono)', fontSize: '16px' }}>{selectedOrder.order_number}</h2>
               <button className="modal-close" onClick={() => setSelectedOrder(null)}>✕</button>
             </div>
-
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
               <div style={{ background: 'var(--bg)', borderRadius: '8px', padding: '12px' }}>
                 <p style={{ color: 'var(--text-3)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', margin: '0 0 4px' }}>Customer</p>
@@ -248,9 +339,7 @@ const Orders = () => {
               </div>
               <div style={{ background: 'var(--bg)', borderRadius: '8px', padding: '12px' }}>
                 <p style={{ color: 'var(--text-3)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', margin: '0 0 4px' }}>Total</p>
-                <p style={{ fontWeight: '700', fontSize: '22px', color: 'var(--accent-dim)', margin: 0 }}>
-                  GH₵ {parseFloat(selectedOrder.total_amount || 0).toFixed(2)}
-                </p>
+                <p style={{ fontWeight: '700', fontSize: '22px', color: 'var(--accent-dim)', margin: 0 }}>GH₵ {parseFloat(selectedOrder.total_amount || 0).toFixed(2)}</p>
               </div>
               <div style={{ background: 'var(--bg)', borderRadius: '8px', padding: '12px' }}>
                 <p style={{ color: 'var(--text-3)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', margin: '0 0 6px' }}>Status</p>
@@ -268,28 +357,136 @@ const Orders = () => {
                 </span>
               </div>
             </div>
-
             {selectedOrder.delivery_address && (
               <div style={{ background: 'var(--bg)', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
                 <p style={{ color: 'var(--text-3)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', margin: '0 0 4px' }}>Delivery Address</p>
                 <p style={{ margin: 0, fontSize: '13px' }}>{selectedOrder.delivery_address}</p>
               </div>
             )}
-
             <div style={{ display: 'flex', gap: '8px' }}>
-              <select
-                className="form-input"
-                style={{ flex: 1 }}
-                value={selectedOrder.status}
-                onChange={e => updateStatus(selectedOrder.id, e.target.value)}
-              >
+              <select className="form-input" style={{ flex: 1 }} value={selectedOrder.status} onChange={e => updateStatus(selectedOrder.id, e.target.value)}>
                 {STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
               </select>
               <button className="btn btn-success" onClick={() => sendWhatsApp(selectedOrder)} style={{ gap: '6px' }}>
                 <WhatsAppIcon /> WhatsApp
               </button>
-              <button className="btn btn-danger" onClick={() => handleDelete(selectedOrder)}>
-                🗑 Delete
+              <button className="btn btn-danger" onClick={() => handleDelete(selectedOrder)}>🗑</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Create order modal */}
+      {showCreate && (
+        <div className="modal-overlay" onClick={() => setShowCreate(false)}>
+          <div className="modal" style={{ maxWidth: '580px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">New Order</h2>
+              <button className="modal-close" onClick={() => setShowCreate(false)}>✕</button>
+            </div>
+
+            {/* Customer */}
+            <div className="form-group">
+              <label className="form-label">Customer *</label>
+              <select className="form-input" value={orderForm.customer_id} onChange={e => {
+                const customer = customers.find(c => c.id === parseInt(e.target.value));
+                setOrderForm(f => ({
+                  ...f,
+                  customer_id: e.target.value,
+                  delivery_address: customer?.address || f.delivery_address,
+                }));
+              }}>
+                <option value="">Select customer...</option>
+                {customers.map(c => <option key={c.id} value={c.id}>{c.name} — {c.phone}</option>)}
+              </select>
+            </div>
+
+            {/* Add products */}
+            <div className="form-group">
+              <label className="form-label">Add Products *</label>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <select
+                  className="form-input"
+                  style={{ flex: 1 }}
+                  value={selectedProduct}
+                  onChange={e => setSelectedProduct(e.target.value)}
+                >
+                  <option value="">Select product...</option>
+                  {products.map(p => (
+                    <option key={p.id} value={p.id}>
+                      {p.name} — GH₵ {parseFloat(p.price).toFixed(2)} (Stock: {p.stock_quantity})
+                    </option>
+                  ))}
+                </select>
+                <input
+                  className="form-input"
+                  type="number"
+                  min="1"
+                  value={selectedQty}
+                  onChange={e => setSelectedQty(parseInt(e.target.value) || 1)}
+                  style={{ width: '70px' }}
+                />
+                <button className="btn btn-primary" onClick={addItem}>Add</button>
+              </div>
+            </div>
+
+            {/* Items list */}
+            {orderForm.items.length > 0 && (
+              <div style={{ background: 'var(--bg)', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
+                {orderForm.items.map(item => (
+                  <div key={item.product_id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: '1px solid var(--border-2)' }}>
+                    <span style={{ flex: 1, fontWeight: '500', fontSize: '13px' }}>{item.name}</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <button
+                        style={{ width: '24px', height: '24px', borderRadius: '50%', border: '1px solid var(--border)', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700' }}
+                        onClick={() => updateItemQty(item.product_id, item.quantity - 1)}
+                      >−</button>
+                      <span style={{ fontWeight: '700', minWidth: '24px', textAlign: 'center' }}>{item.quantity}</span>
+                      <button
+                        style={{ width: '24px', height: '24px', borderRadius: '50%', border: '1px solid var(--border)', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700' }}
+                        onClick={() => updateItemQty(item.product_id, item.quantity + 1)}
+                      >+</button>
+                    </div>
+                    <span style={{ fontWeight: '700', color: 'var(--accent-dim)', minWidth: '80px', textAlign: 'right' }}>
+                      GH₵ {(item.unit_price * item.quantity).toFixed(2)}
+                    </span>
+                    <button
+                      style={{ background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: '16px' }}
+                      onClick={() => removeItem(item.product_id)}
+                    >✕</button>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '10px', fontWeight: '700', fontSize: '15px' }}>
+                  <span>Total</span>
+                  <span style={{ color: 'var(--accent-dim)' }}>GH₵ {orderTotal.toFixed(2)}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Payment + address */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div className="form-group">
+                <label className="form-label">Payment Method *</label>
+                <select className="form-input" value={orderForm.payment_method} onChange={e => setOrderForm(f => ({ ...f, payment_method: e.target.value }))}>
+                  <option value="cash">Cash</option>
+                  <option value="momo">MoMo</option>
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Delivery Address *</label>
+                <input className="form-input" value={orderForm.delivery_address} onChange={e => setOrderForm(f => ({ ...f, delivery_address: e.target.value }))} placeholder="e.g. Accra, East Legon" />
+              </div>
+            </div>
+
+            <div className="form-group">
+              <label className="form-label">Notes</label>
+              <textarea className="form-input" rows={2} value={orderForm.notes} onChange={e => setOrderForm(f => ({ ...f, notes: e.target.value }))} placeholder="Any special instructions..." />
+            </div>
+
+            <div style={{ display: 'flex', gap: '10px' }}>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowCreate(false)}>Cancel</button>
+              <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleCreateOrder} disabled={saving}>
+                {saving ? 'Creating...' : `Create Order — GH₵ ${orderTotal.toFixed(2)}`}
               </button>
             </div>
           </div>

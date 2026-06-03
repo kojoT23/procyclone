@@ -21,6 +21,7 @@ const Sidebar = ({ isOpen, onClose }) => {
     { to: '/cash', label: 'Cash Control', icon: '◈', permission: 'manage_cash' },
     { to: '/payments', label: 'Payments', icon: '⊛', permission: 'manage_cash' },
     { to: '/reports', label: 'Reports', icon: '◐', permission: 'view_reports' },
+    { to: '/receipts', label: 'Receipts', icon: '🧾', permission: null },
     { to: '/users', label: 'Staff', icon: '◑', permission: 'manage_users' },
   ];
 
