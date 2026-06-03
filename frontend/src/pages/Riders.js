@@ -10,12 +10,13 @@ const Riders = () => {
   const [editRider, setEditRider] = useState(null);
   const [assign, setAssign] = useState({ order_id: '', rider_id: '' });
   const [form, setForm] = useState({ name: '', phone: '', vehicle_type: '', vehicle_number: '' });
+  const [search, setSearch] = useState('');
 
   const fetchData = async () => {
     try {
       const [r, o] = await Promise.all([ridersAPI.getAll(), ordersAPI.getAll()]);
-      setRiders(r.data.riders);
-      setOrders(o.data.orders.filter(o => o.status === 'confirmed' || o.status === 'pending'));
+      setRiders(r.data.riders || []);
+      setOrders((o.data.orders || []).filter(o => o.status === 'confirmed' || o.status === 'pending'));
     } catch (err) { console.error(err); }
     finally { setLoading(false); }
   };
@@ -28,8 +29,9 @@ const Riders = () => {
 
   const handleEdit = (rider) => {
     setEditRider(rider);
-    setForm({ name: rider.name, phone: rider.phone, vehicle_type: rider.vehicle_type||'', vehicle_number: rider.vehicle_number||'' });
+    setForm({ name: rider.name, phone: rider.phone, vehicle_type: rider.vehicle_type || '', vehicle_number: rider.vehicle_number || '' });
     setShowForm(true);
+    setShowAssign(false);
   };
 
   const handleSubmit = async (e) => {
@@ -37,10 +39,8 @@ const Riders = () => {
     try {
       if (editRider) {
         await ridersAPI.update(editRider.id, form);
-        alert('Rider updated!');
       } else {
         await ridersAPI.create(form);
-        alert('Rider added!');
       }
       setShowForm(false);
       setEditRider(null);
@@ -73,118 +73,268 @@ const Riders = () => {
     setForm({ name: '', phone: '', vehicle_type: '', vehicle_number: '' });
   };
 
-  if (loading) return <div style={{padding:'24px'}}>Loading...</div>;
+  const filtered = riders.filter(r =>
+    r.name?.toLowerCase().includes(search.toLowerCase()) ||
+    r.phone?.includes(search)
+  );
+
+  const available = riders.filter(r => r.is_available).length;
+  const busy = riders.filter(r => !r.is_available).length;
+
+  if (loading) return (
+    <div className="loading">
+      <div className="loading-spinner"/>
+      <span className="loading-text">Loading riders...</span>
+    </div>
+  );
 
   return (
-    <div style={{padding:'24px'}}>
-      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',marginBottom:'24px'}}>
-        <h1 style={{fontSize:'24px',fontWeight:'bold',color:'#1a1a2e',margin:0}}>Riders</h1>
-        <div style={{display:'flex',gap:'8px'}}>
-          <button onClick={() => setShowAssign(!showAssign)} style={{padding:'10px 20px',background:'#f39c12',color:'white',border:'none',borderRadius:'6px',cursor:'pointer',fontSize:'14px'}}>
+    <div>
+      {/* Page Header */}
+      <div className="page-header">
+        <div>
+          <h1 className="page-title">Riders</h1>
+          <p className="page-subtitle">Manage delivery riders and assign orders</p>
+        </div>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <button className="btn btn-warning" onClick={() => { setShowAssign(!showAssign); setShowForm(false); }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
             Assign Delivery
           </button>
-          <button onClick={() => setShowForm(!showForm)} style={{padding:'10px 20px',background:'#1a1a2e',color:'white',border:'none',borderRadius:'6px',cursor:'pointer',fontSize:'14px'}}>
-            {showForm ? 'Cancel' : '+ Add Rider'}
+          <button className="btn btn-primary" onClick={() => { setShowForm(!showForm); setShowAssign(false); setEditRider(null); setForm({ name: '', phone: '', vehicle_type: '', vehicle_number: '' }); }}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+            Add Rider
           </button>
         </div>
       </div>
 
+      {/* Stat Cards */}
+      <div className="stats-grid" style={{ marginBottom: '1.5rem' }}>
+        <div className="stat-card" style={{ '--accent-color': 'var(--accent)' }}>
+          <div className="stat-icon">🏍️</div>
+          <div>
+            <div className="stat-label">Total Riders</div>
+            <div className="stat-value">{riders.length}</div>
+          </div>
+        </div>
+        <div className="stat-card" style={{ '--accent-color': '#22c55e' }}>
+          <div className="stat-icon">✅</div>
+          <div>
+            <div className="stat-label">Available</div>
+            <div className="stat-value">{available}</div>
+          </div>
+        </div>
+        <div className="stat-card" style={{ '--accent-color': '#ef4444' }}>
+          <div className="stat-icon">🚴</div>
+          <div>
+            <div className="stat-label">On Delivery</div>
+            <div className="stat-value">{busy}</div>
+          </div>
+        </div>
+        <div className="stat-card" style={{ '--accent-color': '#3b82f6' }}>
+          <div className="stat-icon">📦</div>
+          <div>
+            <div className="stat-label">Pending Orders</div>
+            <div className="stat-value">{orders.length}</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Assign Delivery Modal */}
       {showAssign && (
-        <div style={{background:'white',padding:'24px',borderRadius:'10px',boxShadow:'0 2px 8px rgba(0,0,0,0.08)',marginBottom:'24px'}}>
-          <h2 style={{fontSize:'18px',fontWeight:'600',marginBottom:'16px'}}>Assign Delivery</h2>
-          <form onSubmit={handleAssign}>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'16px'}}>
-              <div>
-                <label style={{display:'block',marginBottom:'6px',fontSize:'14px',fontWeight:'500'}}>Select Order</label>
-                <select value={assign.order_id} onChange={e => setAssign({...assign, order_id: e.target.value})} style={{width:'100%',padding:'8px',border:'1px solid #ddd',borderRadius:'6px'}} required>
-                  <option value="">Select order</option>
-                  {orders.map(o => <option key={o.id} value={o.id}>{o.order_number} - {o.customer_name||'N/A'} - GH{Number(o.total_amount).toFixed(2)}</option>)}
+        <div className="modal-overlay" onClick={() => setShowAssign(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">Assign Delivery</h2>
+              <button className="modal-close" onClick={() => setShowAssign(false)}>✕</button>
+            </div>
+            <form onSubmit={handleAssign}>
+              <div className="form-group">
+                <label className="form-label">Select Order</label>
+                <select
+                  className="form-input"
+                  value={assign.order_id}
+                  onChange={e => setAssign({ ...assign, order_id: e.target.value })}
+                  required
+                >
+                  <option value="">Choose an order...</option>
+                  {orders.map(o => (
+                    <option key={o.id} value={o.id}>
+                      {o.order_number} — {o.customer_name || 'N/A'} — GHS {Number(o.total_amount).toFixed(2)}
+                    </option>
+                  ))}
                 </select>
               </div>
-              <div>
-                <label style={{display:'block',marginBottom:'6px',fontSize:'14px',fontWeight:'500'}}>Select Rider</label>
-                <select value={assign.rider_id} onChange={e => setAssign({...assign, rider_id: e.target.value})} style={{width:'100%',padding:'8px',border:'1px solid #ddd',borderRadius:'6px'}} required>
-                  <option value="">Select rider</option>
-                  {riders.map(r => <option key={r.id} value={r.id}>{r.name} - {r.phone}</option>)}
+              <div className="form-group">
+                <label className="form-label">Select Rider</label>
+                <select
+                  className="form-input"
+                  value={assign.rider_id}
+                  onChange={e => setAssign({ ...assign, rider_id: e.target.value })}
+                  required
+                >
+                  <option value="">Choose a rider...</option>
+                  {riders.map(r => (
+                    <option key={r.id} value={r.id}>
+                      {r.name} — {r.phone} — {r.is_available ? 'Available' : 'Busy'}
+                    </option>
+                  ))}
                 </select>
               </div>
-            </div>
-            <div style={{display:'flex',gap:'8px',justifyContent:'flex-end'}}>
-              <button type="button" onClick={() => setShowAssign(false)} style={{padding:'10px 20px',background:'#f0f2f5',border:'1px solid #ddd',borderRadius:'6px',cursor:'pointer'}}>Cancel</button>
-              <button type="submit" style={{padding:'10px 24px',background:'#2ecc71',color:'white',border:'none',borderRadius:'6px',cursor:'pointer',fontSize:'14px',fontWeight:'600'}}>Assign</button>
-            </div>
-          </form>
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                <button type="button" className="btn btn-secondary" onClick={() => setShowAssign(false)}>Cancel</button>
+                <button type="submit" className="btn btn-success">Assign Delivery</button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
+      {/* Add / Edit Rider Modal */}
       {showForm && (
-        <div style={{background:'white',padding:'24px',borderRadius:'10px',boxShadow:'0 2px 8px rgba(0,0,0,0.08)',marginBottom:'24px'}}>
-          <h2 style={{fontSize:'18px',fontWeight:'600',marginBottom:'16px'}}>{editRider ? 'Edit Rider' : 'Add New Rider'}</h2>
-          <form onSubmit={handleSubmit}>
-            <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:'16px',marginBottom:'16px'}}>
-              <div>
-                <label style={{display:'block',marginBottom:'6px',fontSize:'14px',fontWeight:'500'}}>Full Name</label>
-                <input value={form.name} onChange={e => setForm({...form, name: e.target.value})} style={{width:'100%',padding:'8px',border:'1px solid #ddd',borderRadius:'6px',boxSizing:'border-box'}} placeholder="Enter full name" required />
-              </div>
-              <div>
-                <label style={{display:'block',marginBottom:'6px',fontSize:'14px',fontWeight:'500'}}>Phone Number</label>
-                <input value={form.phone} onChange={e => setForm({...form, phone: e.target.value})} style={{width:'100%',padding:'8px',border:'1px solid #ddd',borderRadius:'6px',boxSizing:'border-box'}} placeholder="e.g. 0244123456" required />
-              </div>
-              <div>
-                <label style={{display:'block',marginBottom:'6px',fontSize:'14px',fontWeight:'500'}}>Vehicle Type</label>
-                <input value={form.vehicle_type} onChange={e => setForm({...form, vehicle_type: e.target.value})} style={{width:'100%',padding:'8px',border:'1px solid #ddd',borderRadius:'6px',boxSizing:'border-box'}} placeholder="e.g. Motorbike, Bicycle" />
-              </div>
-              <div>
-                <label style={{display:'block',marginBottom:'6px',fontSize:'14px',fontWeight:'500'}}>Vehicle Number</label>
-                <input value={form.vehicle_number} onChange={e => setForm({...form, vehicle_number: e.target.value})} style={{width:'100%',padding:'8px',border:'1px solid #ddd',borderRadius:'6px',boxSizing:'border-box'}} placeholder="e.g. GR-1234-22" />
-              </div>
+        <div className="modal-overlay" onClick={handleCancel}>
+          <div className="modal" onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">{editRider ? 'Edit Rider' : 'Add New Rider'}</h2>
+              <button className="modal-close" onClick={handleCancel}>✕</button>
             </div>
-            <div style={{display:'flex',gap:'8px',justifyContent:'flex-end'}}>
-              <button type="button" onClick={handleCancel} style={{padding:'10px 20px',background:'#f0f2f5',border:'1px solid #ddd',borderRadius:'6px',cursor:'pointer'}}>Cancel</button>
-              <button type="submit" style={{padding:'10px 24px',background:'#2ecc71',color:'white',border:'none',borderRadius:'6px',cursor:'pointer',fontSize:'14px',fontWeight:'600'}}>{editRider ? 'Update Rider' : 'Add Rider'}</button>
-            </div>
-          </form>
+            <form onSubmit={handleSubmit}>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
+                <div className="form-group">
+                  <label className="form-label">Full Name</label>
+                  <input
+                    className="form-input"
+                    value={form.name}
+                    onChange={e => setForm({ ...form, name: e.target.value })}
+                    placeholder="Enter full name"
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Phone Number</label>
+                  <input
+                    className="form-input"
+                    value={form.phone}
+                    onChange={e => setForm({ ...form, phone: e.target.value })}
+                    placeholder="e.g. 0244123456"
+                    required
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Vehicle Type</label>
+                  <input
+                    className="form-input"
+                    value={form.vehicle_type}
+                    onChange={e => setForm({ ...form, vehicle_type: e.target.value })}
+                    placeholder="e.g. Motorbike, Bicycle"
+                  />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Vehicle Number</label>
+                  <input
+                    className="form-input"
+                    value={form.vehicle_number}
+                    onChange={e => setForm({ ...form, vehicle_number: e.target.value })}
+                    placeholder="e.g. GR-1234-22"
+                  />
+                </div>
+              </div>
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end', marginTop: '1rem' }}>
+                <button type="button" className="btn btn-secondary" onClick={handleCancel}>Cancel</button>
+                <button type="submit" className="btn btn-success">
+                  {editRider ? 'Update Rider' : 'Add Rider'}
+                </button>
+              </div>
+            </form>
+          </div>
         </div>
       )}
 
-      <div style={{background:'white',borderRadius:'10px',boxShadow:'0 2px 8px rgba(0,0,0,0.08)',overflow:'hidden'}}>
-        <table style={{width:'100%',borderCollapse:'collapse'}}>
-          <thead>
-            <tr style={{background:'#f8f9fa'}}>
-              <th style={{textAlign:'left',padding:'12px',fontSize:'13px',color:'#666'}}>Name</th>
-              <th style={{textAlign:'left',padding:'12px',fontSize:'13px',color:'#666'}}>Phone</th>
-              <th style={{textAlign:'left',padding:'12px',fontSize:'13px',color:'#666'}}>Vehicle</th>
-              <th style={{textAlign:'left',padding:'12px',fontSize:'13px',color:'#666'}}>Status</th>
-              <th style={{textAlign:'left',padding:'12px',fontSize:'13px',color:'#666'}}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {riders.length === 0
-              ? <tr><td colSpan="5" style={{textAlign:'center',padding:'40px',color:'#999'}}>No riders yet</td></tr>
-              : riders.map(rider => (
-                <tr key={rider.id} style={{borderBottom:'1px solid #f0f0f0'}}>
-                  <td style={{padding:'12px',fontSize:'14px',fontWeight:'500'}}>{rider.name}</td>
-                  <td style={{padding:'12px',fontSize:'14px'}}>{rider.phone}</td>
-                  <td style={{padding:'12px',fontSize:'14px'}}>{rider.vehicle_type||'-'} {rider.vehicle_number ? '('+rider.vehicle_number+')' : ''}</td>
-                  <td style={{padding:'12px'}}>
-                    <span style={{padding:'3px 10px',borderRadius:'20px',color:'white',fontSize:'12px',background: rider.is_available ? '#2ecc71' : '#e74c3c'}}>
-                      {rider.is_available ? 'Available' : 'Busy'}
-                    </span>
-                  </td>
-                  <td style={{padding:'12px',display:'flex',gap:'4px'}}>
-                    <button onClick={() => window.open('https://wa.me/'+rider.phone.replace(/[^0-9]/g,''), '_blank')} style={{padding:'4px 12px',background:'#25D366',color:'white',border:'none',borderRadius:'4px',cursor:'pointer',fontSize:'12px'}}>WhatsApp</button>
-                    <button onClick={() => handleEdit(rider)} style={{padding:'4px 12px',background:'#3498db',color:'white',border:'none',borderRadius:'4px',cursor:'pointer',fontSize:'12px'}}>Edit</button>
-                    <button onClick={() => handleDelete(rider.id)} style={{padding:'4px 12px',background:'#e74c3c',color:'white',border:'none',borderRadius:'4px',cursor:'pointer',fontSize:'12px'}}>Remove</button>
-                  </td>
+      {/* Search + Table */}
+      <div className="card">
+        <div className="card-header">
+          <h3 className="card-title">All Riders</h3>
+          <div className="search-bar">
+            <svg className="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+            </svg>
+            <input
+              className="search-input"
+              placeholder="Search by name or phone..."
+              value={search}
+              onChange={e => setSearch(e.target.value)}
+            />
+          </div>
+        </div>
+
+        {filtered.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">🏍️</div>
+            <p>No riders found</p>
+          </div>
+        ) : (
+          <div className="table-wrapper">
+            <table>
+              <thead>
+                <tr>
+                  <th>Rider</th>
+                  <th>Phone</th>
+                  <th>Vehicle</th>
+                  <th>Status</th>
+                  <th>Actions</th>
                 </tr>
-              ))
-            }
-          </tbody>
-        </table>
+              </thead>
+              <tbody>
+                {filtered.map(rider => (
+                  <tr key={rider.id}>
+                    <td>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+                        <div className="avatar avatar-sm" style={{ background: 'var(--navy)', color: 'var(--accent)', fontWeight: 700 }}>
+                          {rider.name?.charAt(0).toUpperCase()}
+                        </div>
+                        <strong>{rider.name}</strong>
+                      </div>
+                    </td>
+                    <td>{rider.phone}</td>
+                    <td>
+                      {rider.vehicle_type || '—'}
+                      {rider.vehicle_number && (
+                        <span style={{ color: 'var(--text-3)', marginLeft: '0.4rem', fontSize: '0.82rem' }}>
+                          ({rider.vehicle_number})
+                        </span>
+                      )}
+                    </td>
+                    <td>
+                      <span className={`badge ${rider.is_available ? 'badge-green' : 'badge-red'}`}>
+                        {rider.is_available ? 'Available' : 'Busy'}
+                      </span>
+                    </td>
+                    <td>
+                      <div style={{ display: 'flex', gap: '0.4rem' }}>
+                        <button
+                          className="btn btn-sm"
+                          style={{ background: '#25D366', color: 'white', border: 'none' }}
+                          onClick={() => window.open('https://wa.me/' + rider.phone.replace(/[^0-9]/g, ''), '_blank')}
+                          title="WhatsApp"
+                        >
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/>
+                            <path d="M12 0C5.373 0 0 5.373 0 12c0 2.119.554 4.107 1.523 5.83L0 24l6.338-1.498A11.955 11.955 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.818a9.818 9.818 0 0 1-5.006-1.371l-.36-.214-3.732.882.899-3.641-.235-.374A9.818 9.818 0 1 1 12 21.818z"/>
+                          </svg>
+                        </button>
+                        <button className="btn btn-sm btn-blue" onClick={() => handleEdit(rider)}>Edit</button>
+                        <button className="btn btn-sm btn-danger" onClick={() => handleDelete(rider.id)}>Delete</button>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );
 };
 
 export default Riders;
-
