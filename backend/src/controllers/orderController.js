@@ -159,12 +159,42 @@ const updateOrderStatus = async (req, res) => {
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
+const deleteOrder = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
 
-module.exports = {
-  getOrders,
-  getOrder,
-  createOrder,
-  updateOrderStatus,
-  createOrderValidation,
-  updateStatusValidation
+    await client.query('BEGIN');
+
+    // Check order exists
+    const check = await client.query('SELECT id, order_number FROM orders WHERE id = $1', [id]);
+    if (check.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    // Delete related records first
+    await client.query('DELETE FROM order_items WHERE order_id = $1', [id]);
+    await client.query('DELETE FROM payments WHERE order_id = $1', [id]);
+    await client.query('DELETE FROM deliveries WHERE order_id = $1', [id]);
+    await client.query('DELETE FROM cash_logs WHERE order_id = $1', [id]);
+
+    // Now delete the order
+    await client.query('DELETE FROM orders WHERE id = $1', [id]);
+
+    await client.query('COMMIT');
+
+    res.json({ success: true, message: `Order ${check.rows[0].order_number} deleted` });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('deleteOrder error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  } finally {
+    client.release();
+  }
 };
+
+
+
+
+module.exports = { getOrders, getOrder, createOrder, updateOrderStatus, deleteOrder, createOrderValidation, updateStatusValidation };

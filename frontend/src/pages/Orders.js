@@ -1,31 +1,25 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { ordersAPI } from '../utils/api';
 
 const STATUS_COLORS = {
-  pending:          { bg: '#fff3cd', text: '#856404' },
-  confirmed:        { bg: '#cce5ff', text: '#004085' },
-  packing:          { bg: '#d4edda', text: '#155724' },
-  assigned:         { bg: '#e2d9f3', text: '#4a235a' },
-  out_for_delivery: { bg: '#ffd6a5', text: '#7d4e00' },
-  delivered:        { bg: '#d4edda', text: '#155724' },
-  failed:           { bg: '#f8d7da', text: '#721c24' },
-  returned:         { bg: '#e2e3e5', text: '#383d41' },
+  pending:          { bg: '#fef3c7', text: '#d97706' },
+  confirmed:        { bg: '#dbeafe', text: '#1d4ed8' },
+  packing:          { bg: '#ede9fe', text: '#7c3aed' },
+  assigned:         { bg: '#ccfbf1', text: '#0f766e' },
+  out_for_delivery: { bg: '#fed7aa', text: '#c2410c' },
+  delivered:        { bg: '#dcfce7', text: '#16a34a' },
+  failed:           { bg: '#fee2e2', text: '#dc2626' },
+  returned:         { bg: '#f1f5f9', text: '#475569' },
 };
 
 const STATUSES = ['pending','confirmed','packing','assigned','out_for_delivery','delivered','failed','returned'];
 
-const Badge = ({ value, map }) => {
-  const c = map[value] || { bg: '#eee', text: '#333' };
-  return (
-    <span style={{
-      background: c.bg, color: c.text,
-      padding: '3px 10px', borderRadius: '20px',
-      fontSize: '11px', fontWeight: '600', textTransform: 'capitalize', whiteSpace: 'nowrap',
-    }}>
-      {value?.replace(/_/g, ' ')}
-    </span>
-  );
-};
+const WhatsAppIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347m-5.421 7.403h-.004a9.87 9.87 0 01-5.031-1.378l-.361-.214-3.741.982.998-3.648-.235-.374a9.86 9.86 0 01-1.51-5.26c.001-5.45 4.436-9.884 9.888-9.884 2.64 0 5.122 1.03 6.988 2.898a9.825 9.825 0 012.893 6.994c-.003 5.45-4.437 9.884-9.885 9.884m8.413-18.297A11.815 11.815 0 0012.05 0C5.495 0 .16 5.335.157 11.892c0 2.096.547 4.142 1.588 5.945L.057 24l6.305-1.654a11.882 11.882 0 005.683 1.448h.005c6.554 0 11.89-5.335 11.893-11.893a11.821 11.821 0 00-3.48-8.413z"/>
+  </svg>
+);
 
 const Orders = () => {
   const [orders, setOrders] = useState([]);
@@ -37,6 +31,7 @@ const Orders = () => {
   const [filterStatus, setFilterStatus] = useState('');
   const [filterPayment, setFilterPayment] = useState('');
   const [updating, setUpdating] = useState(null);
+  const [deleting, setDeleting] = useState(null);
   const [selectedOrder, setSelectedOrder] = useState(null);
 
   const fetchOrders = useCallback(async () => {
@@ -58,8 +53,6 @@ const Orders = () => {
   }, [page, search, filterStatus, filterPayment]);
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
-
-  // Reset to page 1 when filters change
   useEffect(() => { setPage(1); }, [search, filterStatus, filterPayment]);
 
   const updateStatus = async (orderId, status) => {
@@ -67,9 +60,7 @@ const Orders = () => {
       setUpdating(orderId);
       await ordersAPI.updateStatus(orderId, { status });
       fetchOrders();
-      if (selectedOrder?.id === orderId) {
-        setSelectedOrder(prev => ({ ...prev, status }));
-      }
+      if (selectedOrder?.id === orderId) setSelectedOrder(prev => ({ ...prev, status }));
     } catch (err) {
       console.error(err);
     } finally {
@@ -77,69 +68,70 @@ const Orders = () => {
     }
   };
 
+  const handleDelete = async (order) => {
+    if (!window.confirm(`Delete order ${order.order_number}? This cannot be undone.`)) return;
+    try {
+      setDeleting(order.id);
+      await ordersAPI.delete(order.id);
+      fetchOrders();
+      if (selectedOrder?.id === order.id) setSelectedOrder(null);
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error deleting order');
+    } finally {
+      setDeleting(null);
+    }
+  };
+
   const sendWhatsApp = (order) => {
     const msg = `Hi ${order.customer_name || 'Customer'}, your ProCyclone order ${order.order_number} is now *${order.status?.replace(/_/g, ' ')}*. Total: GH₵ ${parseFloat(order.total_amount).toFixed(2)}. Thank you!`;
     const phone = order.customer_phone?.replace(/\D/g, '');
-    window.open(`https://wa.me/${phone}?text=${encodeURIComponent(msg)}`, '_blank');
+    const intlPhone = phone?.startsWith('0') ? '233' + phone.slice(1) : phone;
+    window.open(`https://wa.me/${intlPhone}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
   return (
     <div>
-      {/* Header */}
       <div className="page-header">
         <div>
           <h1 className="page-title">Orders</h1>
-          <p style={{ color: '#888', fontSize: '13px', margin: '4px 0 0' }}>{total} total orders</p>
+          <p className="page-subtitle">{total} total orders</p>
         </div>
       </div>
 
       {/* Search + filters */}
-      <div className="card" style={{ marginBottom: '16px' }}>
+      <div className="card" style={{ marginBottom: '16px', padding: '16px 20px' }}>
         <div className="search-bar">
           <input
             className="search-input"
-            placeholder="🔍 Search by order #, customer name or phone..."
+            placeholder="Search by order #, customer name or phone..."
             value={search}
             onChange={e => setSearch(e.target.value)}
           />
-          <select
-            className="form-input"
-            style={{ width: 'auto', minWidth: '140px' }}
-            value={filterStatus}
-            onChange={e => setFilterStatus(e.target.value)}
-          >
+          <select className="form-input" style={{ width: 'auto', minWidth: '140px' }} value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
             <option value="">All statuses</option>
-            {STATUSES.map(s => (
-              <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
-            ))}
+            {STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
           </select>
-          <select
-            className="form-input"
-            style={{ width: 'auto', minWidth: '130px' }}
-            value={filterPayment}
-            onChange={e => setFilterPayment(e.target.value)}
-          >
+          <select className="form-input" style={{ width: 'auto', minWidth: '130px' }} value={filterPayment} onChange={e => setFilterPayment(e.target.value)}>
             <option value="">All payments</option>
             <option value="cash">Cash</option>
             <option value="momo">MoMo</option>
           </select>
           {(search || filterStatus || filterPayment) && (
-            <button
-              className="btn btn-secondary"
-              onClick={() => { setSearch(''); setFilterStatus(''); setFilterPayment(''); }}
-            >
-              Clear
-            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(''); setFilterStatus(''); setFilterPayment(''); }}>Clear</button>
           )}
         </div>
       </div>
 
       {/* Table */}
-      <div className="card">
+      <div className="card" style={{ padding: 0, overflow: 'hidden' }}>
         {loading ? (
-          <div className="loading">Loading orders...</div>
+          <div className="loading">
+            <div className="loading-spinner" />
+            <p className="loading-text">Loading orders...</p>
+          </div>
         ) : orders.length === 0 ? (
           <div className="empty-state">
+            <div className="empty-icon">🛍️</div>
             <h3>No orders found</h3>
             <p>Try adjusting your search or filters</p>
           </div>
@@ -163,50 +155,62 @@ const Orders = () => {
                     <tr key={order.id}>
                       <td>
                         <span
-                          style={{ fontWeight: '600', color: '#1a1a2e', cursor: 'pointer' }}
+                          style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: '600', color: 'var(--navy)', cursor: 'pointer' }}
                           onClick={() => setSelectedOrder(order)}
                         >
                           {order.order_number}
                         </span>
                       </td>
                       <td>
-                        <div style={{ fontWeight: '500' }}>{order.customer_name || '—'}</div>
-                        <div style={{ fontSize: '11px', color: '#888' }}>{order.customer_phone}</div>
+                        <div style={{ fontWeight: '600' }}>{order.customer_name || '—'}</div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-3)' }}>{order.customer_phone}</div>
                       </td>
-                      <td><Badge value={order.status} map={STATUS_COLORS} /></td>
                       <td>
-                        <span style={{
-                          background: order.payment_method === 'momo' ? '#cce5ff' : '#fff3cd',
-                          color: order.payment_method === 'momo' ? '#004085' : '#856404',
-                          padding: '3px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: '600',
+                        <span className="badge" style={{ background: STATUS_COLORS[order.status]?.bg, color: STATUS_COLORS[order.status]?.text }}>
+                          {order.status?.replace(/_/g, ' ')}
+                        </span>
+                      </td>
+                      <td>
+                        <span className="badge" style={{
+                          background: order.payment_method === 'momo' ? '#dbeafe' : '#fef3c7',
+                          color: order.payment_method === 'momo' ? '#1d4ed8' : '#d97706',
                         }}>
                           {order.payment_method?.toUpperCase()}
                         </span>
                       </td>
-                      <td style={{ fontWeight: '600' }}>GH₵ {parseFloat(order.total_amount || 0).toFixed(2)}</td>
-                      <td style={{ color: '#888', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                      <td style={{ fontWeight: '700', color: 'var(--accent-dim)' }}>
+                        GH₵ {parseFloat(order.total_amount || 0).toFixed(2)}
+                      </td>
+                      <td style={{ color: 'var(--text-3)', fontSize: '12px', whiteSpace: 'nowrap' }}>
                         {new Date(order.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
                       </td>
                       <td>
-                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                           <select
                             className="form-input"
-                            style={{ width: 'auto', fontSize: '12px', padding: '4px 8px' }}
+                            style={{ width: 'auto', fontSize: '12px', padding: '5px 28px 5px 8px', minWidth: '110px' }}
                             value={order.status}
                             disabled={updating === order.id}
                             onChange={e => updateStatus(order.id, e.target.value)}
                           >
-                            {STATUSES.map(s => (
-                              <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
-                            ))}
+                            {STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
                           </select>
                           <button
-                            className="btn btn-success"
-                            style={{ padding: '4px 8px', fontSize: '12px' }}
+                            className="btn btn-success btn-sm"
+                            style={{ padding: '6px 10px' }}
                             onClick={() => sendWhatsApp(order)}
-                            title="Send WhatsApp update"
+                            data-tip="Send WhatsApp update"
                           >
-                            💬
+                            <WhatsAppIcon />
+                          </button>
+                          <button
+                            className="btn btn-danger btn-sm"
+                            style={{ padding: '6px 10px' }}
+                            onClick={() => handleDelete(order)}
+                            disabled={deleting === order.id}
+                            data-tip="Delete order"
+                          >
+                            🗑
                           </button>
                         </div>
                       </td>
@@ -216,12 +220,11 @@ const Orders = () => {
               </table>
             </div>
 
-            {/* Pagination */}
             {pages > 1 && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginTop: '20px' }}>
-                <button className="btn btn-secondary" disabled={page === 1} onClick={() => setPage(p => p - 1)}>← Prev</button>
-                <span style={{ fontSize: '13px', color: '#666' }}>Page {page} of {pages}</span>
-                <button className="btn btn-secondary" disabled={page === pages} onClick={() => setPage(p => p + 1)}>Next →</button>
+              <div className="pagination">
+                <button className="btn btn-secondary btn-sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>← Prev</button>
+                <span className="pagination-info">Page {page} of {pages}</span>
+                <button className="btn btn-secondary btn-sm" disabled={page === pages} onClick={() => setPage(p => p + 1)}>Next →</button>
               </div>
             )}
           </>
@@ -233,49 +236,61 @@ const Orders = () => {
         <div className="modal-overlay" onClick={() => setSelectedOrder(null)}>
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 className="modal-title">{selectedOrder.order_number}</h2>
-              <button onClick={() => setSelectedOrder(null)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+              <h2 className="modal-title" style={{ fontFamily: 'var(--font-mono)', fontSize: '16px' }}>{selectedOrder.order_number}</h2>
+              <button className="modal-close" onClick={() => setSelectedOrder(null)}>✕</button>
             </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <p style={{ color: '#888', fontSize: '12px', margin: '0 0 2px' }}>Customer</p>
-                  <p style={{ fontWeight: '600', margin: 0 }}>{selectedOrder.customer_name || '—'}</p>
-                  <p style={{ color: '#888', fontSize: '12px', margin: '2px 0 0' }}>{selectedOrder.customer_phone}</p>
-                </div>
-                <div>
-                  <p style={{ color: '#888', fontSize: '12px', margin: '0 0 2px' }}>Status</p>
-                  <Badge value={selectedOrder.status} map={STATUS_COLORS} />
-                </div>
-                <div>
-                  <p style={{ color: '#888', fontSize: '12px', margin: '0 0 2px' }}>Payment</p>
-                  <p style={{ fontWeight: '600', margin: 0 }}>{selectedOrder.payment_method?.toUpperCase()}</p>
-                </div>
-                <div>
-                  <p style={{ color: '#888', fontSize: '12px', margin: '0 0 2px' }}>Total</p>
-                  <p style={{ fontWeight: '700', fontSize: '18px', color: '#2ecc71', margin: 0 }}>GH₵ {parseFloat(selectedOrder.total_amount || 0).toFixed(2)}</p>
-                </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+              <div style={{ background: 'var(--bg)', borderRadius: '8px', padding: '12px' }}>
+                <p style={{ color: 'var(--text-3)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', margin: '0 0 4px' }}>Customer</p>
+                <p style={{ fontWeight: '600', margin: 0 }}>{selectedOrder.customer_name || '—'}</p>
+                <p style={{ color: 'var(--text-3)', fontSize: '12px', margin: '2px 0 0' }}>{selectedOrder.customer_phone}</p>
               </div>
-              {selectedOrder.delivery_address && (
-                <div>
-                  <p style={{ color: '#888', fontSize: '12px', margin: '0 0 2px' }}>Delivery Address</p>
-                  <p style={{ margin: 0 }}>{selectedOrder.delivery_address}</p>
-                </div>
-              )}
-              <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                <select
-                  className="form-input"
-                  value={selectedOrder.status}
-                  onChange={e => updateStatus(selectedOrder.id, e.target.value)}
-                >
-                  {STATUSES.map(s => (
-                    <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>
-                  ))}
-                </select>
-                <button className="btn btn-success" onClick={() => sendWhatsApp(selectedOrder)}>
-                  💬 WhatsApp
-                </button>
+              <div style={{ background: 'var(--bg)', borderRadius: '8px', padding: '12px' }}>
+                <p style={{ color: 'var(--text-3)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', margin: '0 0 4px' }}>Total</p>
+                <p style={{ fontWeight: '700', fontSize: '22px', color: 'var(--accent-dim)', margin: 0 }}>
+                  GH₵ {parseFloat(selectedOrder.total_amount || 0).toFixed(2)}
+                </p>
               </div>
+              <div style={{ background: 'var(--bg)', borderRadius: '8px', padding: '12px' }}>
+                <p style={{ color: 'var(--text-3)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', margin: '0 0 6px' }}>Status</p>
+                <span className="badge" style={{ background: STATUS_COLORS[selectedOrder.status]?.bg, color: STATUS_COLORS[selectedOrder.status]?.text }}>
+                  {selectedOrder.status?.replace(/_/g, ' ')}
+                </span>
+              </div>
+              <div style={{ background: 'var(--bg)', borderRadius: '8px', padding: '12px' }}>
+                <p style={{ color: 'var(--text-3)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', margin: '0 0 6px' }}>Payment</p>
+                <span className="badge" style={{
+                  background: selectedOrder.payment_method === 'momo' ? '#dbeafe' : '#fef3c7',
+                  color: selectedOrder.payment_method === 'momo' ? '#1d4ed8' : '#d97706',
+                }}>
+                  {selectedOrder.payment_method?.toUpperCase()}
+                </span>
+              </div>
+            </div>
+
+            {selectedOrder.delivery_address && (
+              <div style={{ background: 'var(--bg)', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
+                <p style={{ color: 'var(--text-3)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', margin: '0 0 4px' }}>Delivery Address</p>
+                <p style={{ margin: 0, fontSize: '13px' }}>{selectedOrder.delivery_address}</p>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <select
+                className="form-input"
+                style={{ flex: 1 }}
+                value={selectedOrder.status}
+                onChange={e => updateStatus(selectedOrder.id, e.target.value)}
+              >
+                {STATUSES.map(s => <option key={s} value={s}>{s.replace(/_/g, ' ')}</option>)}
+              </select>
+              <button className="btn btn-success" onClick={() => sendWhatsApp(selectedOrder)} style={{ gap: '6px' }}>
+                <WhatsAppIcon /> WhatsApp
+              </button>
+              <button className="btn btn-danger" onClick={() => handleDelete(selectedOrder)}>
+                🗑 Delete
+              </button>
             </div>
           </div>
         </div>
