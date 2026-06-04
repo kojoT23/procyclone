@@ -142,28 +142,34 @@ Water Bottle,750ml cycling bottle,25.00,100,20,Accessories`;
     URL.revokeObjectURL(url);
   };
 
-  const stockColor = (qty, threshold) => {
-    if (qty === 0) return '#e74c3c';
-    if (qty <= threshold) return '#f39c12';
-    return '#2ecc71';
+  const stockDotColor = (qty, threshold) => {
+    if (qty === 0) return 'var(--badge-red, #e74c3c)';
+    if (qty <= threshold) return 'var(--badge-amber, #f39c12)';
+    return 'var(--accent)';
+  };
+
+  const stockBadge = (product) => {
+    if (product.stock_quantity === 0) return <span className="badge badge-red">Out of stock</span>;
+    if (product.stock_quantity <= product.low_stock_threshold) return <span className="badge badge-amber">Low stock</span>;
+    return <span className="badge badge-green">In stock</span>;
   };
 
   return (
     <div>
+      {/* Page Header */}
       <div className="page-header">
         <div>
           <h1 className="page-title">Products</h1>
-          <p style={{ color: '#888', fontSize: '13px', margin: '4px 0 0' }}>{total} products in inventory</p>
+          <p className="page-subtitle">{total} products in inventory</p>
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button className="btn btn-secondary" onClick={downloadTemplate} style={{ fontSize: '12px' }}>
+          <button className="btn btn-secondary btn-sm" onClick={downloadTemplate}>
             📥 CSV Template
           </button>
           <button
-            className="btn btn-secondary"
+            className="btn btn-secondary btn-sm"
             onClick={() => fileInputRef.current.click()}
             disabled={importing}
-            style={{ fontSize: '12px' }}
           >
             {importing ? '⏳ Importing...' : '📤 Import CSV'}
           </button>
@@ -180,16 +186,15 @@ Water Bottle,750ml cycling bottle,25.00,100,20,Accessories`;
 
       {/* Import result banner */}
       {importResult && (
-        <div style={{
-          background: '#d4edda', border: '1px solid #c3e6cb',
-          borderRadius: '8px', padding: '12px 16px', marginBottom: '16px',
-          display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-        }}>
-          <span style={{ color: '#155724', fontSize: '14px' }}>
+        <div className="alert alert-success" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
+          <span>
             ✅ {importResult.message}
             {importResult.errors?.length > 0 && ` — ${importResult.errors.length} errors`}
           </span>
-          <button onClick={() => setImportResult(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }}>✕</button>
+          <button
+            onClick={() => setImportResult(null)}
+            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', lineHeight: 1 }}
+          >✕</button>
         </div>
       )}
 
@@ -203,7 +208,7 @@ Water Bottle,750ml cycling bottle,25.00,100,20,Accessories`;
             onChange={e => setSearch(e.target.value)}
           />
           {search && (
-            <button className="btn btn-secondary" onClick={() => setSearch('')}>Clear</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setSearch('')}>Clear</button>
           )}
         </div>
       </div>
@@ -211,10 +216,13 @@ Water Bottle,750ml cycling bottle,25.00,100,20,Accessories`;
       {/* Table */}
       <div className="card">
         {loading ? (
-          <div className="loading">Loading products...</div>
+          <div className="loading">
+            <div className="loading-spinner" />
+            <span className="loading-text">Loading products...</span>
+          </div>
         ) : products.length === 0 ? (
           <div className="empty-state">
-            <div style={{ fontSize: '40px', marginBottom: '12px' }}>��</div>
+            <div className="empty-icon">📦</div>
             <h3>No products yet</h3>
             <p>Add products manually or import from CSV</p>
             <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginTop: '16px' }}>
@@ -242,36 +250,32 @@ Water Bottle,750ml cycling bottle,25.00,100,20,Accessories`;
                       <td>
                         <div style={{ fontWeight: '600' }}>{product.name}</div>
                         {product.description && (
-                          <div style={{ fontSize: '12px', color: '#888', marginTop: '2px' }}>
+                          <div style={{ fontSize: '12px', color: 'var(--text-3)', marginTop: '2px' }}>
                             {product.description.substring(0, 50)}{product.description.length > 50 ? '...' : ''}
                           </div>
                         )}
                       </td>
-                      <td style={{ color: '#666', fontSize: '13px' }}>{product.category || '—'}</td>
-                      <td style={{ fontWeight: '600' }}>GH₵ {parseFloat(product.price || 0).toFixed(2)}</td>
+                      <td style={{ color: 'var(--text-2)', fontSize: '13px' }}>
+                        {product.category || '—'}
+                      </td>
+                      <td style={{ fontWeight: '600' }}>
+                        GH₵ {parseFloat(product.price || 0).toFixed(2)}
+                      </td>
                       <td>
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <span style={{
                             width: '8px', height: '8px', borderRadius: '50%',
-                            background: stockColor(product.stock_quantity, product.low_stock_threshold),
+                            background: stockDotColor(product.stock_quantity, product.low_stock_threshold),
                             display: 'inline-block', flexShrink: 0,
                           }} />
                           <span style={{ fontWeight: '600' }}>{product.stock_quantity}</span>
                         </div>
                       </td>
-                      <td>
-                        {product.stock_quantity === 0 ? (
-                          <span style={{ background: '#f8d7da', color: '#721c24', padding: '3px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: '600' }}>Out of stock</span>
-                        ) : product.stock_quantity <= product.low_stock_threshold ? (
-                          <span style={{ background: '#fff3cd', color: '#856404', padding: '3px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: '600' }}>Low stock</span>
-                        ) : (
-                          <span style={{ background: '#d4edda', color: '#155724', padding: '3px 8px', borderRadius: '20px', fontSize: '11px', fontWeight: '600' }}>In stock</span>
-                        )}
-                      </td>
+                      <td>{stockBadge(product)}</td>
                       <td>
                         <div style={{ display: 'flex', gap: '6px' }}>
-                          <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => openEdit(product)}>Edit</button>
-                          <button className="btn btn-danger" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => handleDelete(product.id)}>Delete</button>
+                          <button className="btn btn-secondary btn-sm" onClick={() => openEdit(product)}>Edit</button>
+                          <button className="btn btn-danger btn-sm" onClick={() => handleDelete(product.id)}>Delete</button>
                         </div>
                       </td>
                     </tr>
@@ -281,10 +285,10 @@ Water Bottle,750ml cycling bottle,25.00,100,20,Accessories`;
             </div>
 
             {pages > 1 && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginTop: '20px' }}>
-                <button className="btn btn-secondary" disabled={page === 1} onClick={() => setPage(p => p - 1)}>← Prev</button>
-                <span style={{ fontSize: '13px', color: '#666' }}>Page {page} of {pages}</span>
-                <button className="btn btn-secondary" disabled={page === pages} onClick={() => setPage(p => p + 1)}>Next →</button>
+              <div className="pagination">
+                <button className="btn btn-secondary btn-sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>← Prev</button>
+                <span className="pagination-info">Page {page} of {pages}</span>
+                <button className="btn btn-secondary btn-sm" disabled={page === pages} onClick={() => setPage(p => p + 1)}>Next →</button>
               </div>
             )}
           </>
@@ -297,40 +301,79 @@ Water Bottle,750ml cycling bottle,25.00,100,20,Accessories`;
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2 className="modal-title">{editing ? 'Edit Product' : 'Add Product'}</h2>
-              <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+              <button className="modal-close" onClick={() => setShowModal(false)}>✕</button>
             </div>
 
             <div className="form-group">
               <label className="form-label">Product Name *</label>
-              <input className="form-input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Mountain Bike Helmet" />
+              <input
+                className="form-input"
+                value={form.name}
+                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                placeholder="e.g. Mountain Bike Helmet"
+              />
             </div>
             <div className="form-group">
               <label className="form-label">Description</label>
-              <textarea className="form-input" rows={2} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Short description..." />
+              <textarea
+                className="form-input"
+                rows={2}
+                value={form.description}
+                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
+                placeholder="Short description..."
+              />
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <div className="form-group">
                 <label className="form-label">Price (GH₵) *</label>
-                <input className="form-input" type="number" min="0" step="0.01" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} placeholder="0.00" />
+                <input
+                  className="form-input"
+                  type="number" min="0" step="0.01"
+                  value={form.price}
+                  onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
+                  placeholder="0.00"
+                />
               </div>
               <div className="form-group">
                 <label className="form-label">Stock Quantity</label>
-                <input className="form-input" type="number" min="0" value={form.stock_quantity} onChange={e => setForm(f => ({ ...f, stock_quantity: e.target.value }))} placeholder="0" />
+                <input
+                  className="form-input"
+                  type="number" min="0"
+                  value={form.stock_quantity}
+                  onChange={e => setForm(f => ({ ...f, stock_quantity: e.target.value }))}
+                  placeholder="0"
+                />
               </div>
             </div>
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <div className="form-group">
                 <label className="form-label">Category</label>
-                <input className="form-input" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} placeholder="e.g. Helmets" />
+                <input
+                  className="form-input"
+                  value={form.category}
+                  onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
+                  placeholder="e.g. Helmets"
+                />
               </div>
               <div className="form-group">
                 <label className="form-label">Low Stock Alert</label>
-                <input className="form-input" type="number" min="0" value={form.low_stock_threshold} onChange={e => setForm(f => ({ ...f, low_stock_threshold: e.target.value }))} placeholder="5" />
+                <input
+                  className="form-input"
+                  type="number" min="0"
+                  value={form.low_stock_threshold}
+                  onChange={e => setForm(f => ({ ...f, low_stock_threshold: e.target.value }))}
+                  placeholder="5"
+                />
               </div>
             </div>
             <div className="form-group">
               <label className="form-label">Image URL</label>
-              <input className="form-input" value={form.image_url} onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))} placeholder="https://..." />
+              <input
+                className="form-input"
+                value={form.image_url}
+                onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))}
+                placeholder="https://..."
+              />
             </div>
 
             <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
