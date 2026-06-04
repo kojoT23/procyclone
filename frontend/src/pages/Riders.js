@@ -64,7 +64,13 @@ const Riders = () => {
     if (!flow || !flow.next) return;
     if (!window.confirm(`Move order ${order.order_number} to "${flow.next}"?`)) return;
     try {
-      await ordersAPI.updateStatus(order.id, { status: flow.next });
+      if (order.status === 'confirmed' && order.delivery_id) {
+        await ridersAPI.updateDeliveryStatus(order.delivery_id, { status: 'picked_up' });
+      } else if (order.status === 'processing' && order.delivery_id) {
+        await ridersAPI.updateDeliveryStatus(order.delivery_id, { status: 'delivered' });
+      } else {
+        await ordersAPI.updateStatus(order.id, { status: flow.next });
+      }
       fetchData();
     } catch (err) { alert('Error updating order status'); }
   };

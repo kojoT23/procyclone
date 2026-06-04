@@ -14,7 +14,7 @@ const createOrderValidation = [
 
 const updateStatusValidation = [
   body('status')
-    .isIn(['pending','confirmed','packing','assigned','out_for_delivery','delivered','failed','returned'])
+    .isIn(['pending','confirmed','packing','assigned','processing','out_for_delivery','delivered','failed','returned'])
     .withMessage('Invalid order status'),
 ];
 
