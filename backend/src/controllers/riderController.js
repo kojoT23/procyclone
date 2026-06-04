@@ -70,40 +70,97 @@ const deleteRider = async (req, res) => {
 };
 
 const assignDelivery = async (req, res) => {
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     const { order_id, rider_id } = req.body;
-    const delivery = await pool.query(
-      `INSERT INTO deliveries (order_id, rider_id) VALUES ($1, $2) RETURNING *`,
+
+    // Check order exists and is pending
+    const order = await client.query('SELECT * FROM orders WHERE id = $1', [order_id]);
+    if (order.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Order not found' });
+    }
+
+    // Create delivery record
+    const delivery = await client.query(
+      `INSERT INTO deliveries (order_id, rider_id, assigned_at)
+       VALUES ($1, $2, NOW()) RETURNING *`,
       [order_id, rider_id]
     );
-    await pool.query(
+
+    // Update order status to confirmed + store rider info
+    await client.query(
       'UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2',
-      ['assigned', order_id]
+      ['confirmed', order_id]
     );
+
+    // Mark rider as busy
+    await client.query(
+      'UPDATE riders SET is_available = false, updated_at = NOW() WHERE id = $1',
+      [rider_id]
+    );
+
+    await client.query('COMMIT');
     res.status(201).json({ success: true, message: 'Delivery assigned', delivery: delivery.rows[0] });
   } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('assignDelivery error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
+  } finally {
+    client.release();
   }
 };
 
 const updateDeliveryStatus = async (req, res) => {
+  const client = await pool.connect();
   try {
+    await client.query('BEGIN');
     const { id } = req.params;
     const { status } = req.body;
+
+    // Build delivery update query
     let updateQuery = 'UPDATE deliveries SET status = $1, updated_at = NOW()';
     if (status === 'picked_up') updateQuery += ', picked_up_at = NOW()';
     if (status === 'delivered') updateQuery += ', delivered_at = NOW()';
     updateQuery += ' WHERE id = $2 RETURNING *';
-    const result = await pool.query(updateQuery, [status, id]);
-    if (status === 'delivered') {
-      await pool.query(
+
+    const result = await client.query(updateQuery, [status, id]);
+    if (result.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Delivery not found' });
+    }
+
+    const delivery = result.rows[0];
+
+    // Sync order status
+    if (status === 'picked_up') {
+      await client.query(
         'UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2',
-        ['delivered', result.rows[0].order_id]
+        ['processing', delivery.order_id]
       );
     }
-    res.json({ success: true, message: 'Delivery status updated', delivery: result.rows[0] });
+
+    if (status === 'delivered') {
+      await client.query(
+        'UPDATE orders SET status = $1, updated_at = NOW() WHERE id = $2',
+        ['delivered', delivery.order_id]
+      );
+      // Mark rider available again
+      await client.query(
+        'UPDATE riders SET is_available = true, updated_at = NOW() WHERE id = $1',
+        [delivery.rider_id]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Delivery status updated', delivery });
   } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('updateDeliveryStatus error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
+  } finally {
+    client.release();
   }
 };
 
