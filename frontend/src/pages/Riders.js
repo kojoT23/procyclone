@@ -162,7 +162,7 @@ const Riders = () => {
           <p className="page-subtitle">Manage riders and track order delivery workflow</p>
         </div>
         <div style={{ display: 'flex', gap: '0.5rem' }}>
-          <button className="btn btn-secondary" onClick={fetchData}>Refresh</button>
+          
           {activeTab === 'riders' && (
             <button className="btn btn-primary" onClick={() => { setShowForm(true); setEditRider(null); setForm({ name: '', phone: '', vehicle_type: '', vehicle_number: '' }); }}>
               + Add Rider

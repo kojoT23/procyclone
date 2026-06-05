@@ -1,4 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
+import { useLocation } from 'react-router-dom';
 import { ordersAPI } from '../utils/api';
 import './Receipts.css';
 
@@ -9,10 +11,17 @@ const Receipts = () => {
   const [selected, setSelected] = useState([]);
   const [filterStatus, setFilterStatus] = useState('all');
   const printRef = useRef();
+  const location = useLocation();
 
   useEffect(() => {
     fetchOrders();
   }, []);
+
+  useEffect(() => {
+    if (location.state?.newOrderId && orders.length > 0) {
+      setSelected([location.state.newOrderId]);
+    }
+  }, [location.state, orders]);
 
   const fetchOrders = async () => {
     try {
@@ -50,13 +59,7 @@ const Receipts = () => {
 
   const selectedOrders = orders.filter(o => selected.includes(o.id));
 
-  const handlePrint = () => {
-    if (selected.length === 0) {
-      alert('Please select at least one order to print.');
-      return;
-    }
-    window.print();
-  };
+
 
   const formatCurrency = (amount) =>
     'GHS ' + parseFloat(amount || 0).toFixed(2);
@@ -226,61 +229,84 @@ const Receipts = () => {
       </div>
 
       <div className="print-only" ref={printRef}>
-        {selectedOrders.map((order, idx) => (
-          <div key={order.id} className="receipt-print-page">
-            <div className="receipt-print-header">
-              <div className="receipt-brand">
-                <div className="receipt-logo">PC</div>
-                <div>
-                  <div className="receipt-brand-name">ProCyclone</div>
-                  <div className="receipt-brand-sub">Order Receipt</div>
-                </div>
-              </div>
-              <div className="receipt-meta">
-                <div className="receipt-order-num">{order.order_number}</div>
-                <div className="receipt-date">{formatDate(order.created_at)}</div>
-              </div>
-            </div>
+        {selectedOrders.map((order, idx) => {
+          const detail = orderDetails[order.id] || order;
+          const items = detail.items || [];
+          const isMomo = order.payment_method === 'momo';
+          const isCOD = order.notes && order.notes.toLowerCase().includes('paid on delivery');
+          const isCash = order.payment_method === 'cash' && !isCOD;
+          // Extract momo ref from notes
+          const momoRefMatch = (order.notes || '').match(/MoMo Ref:\s*(\S+)/);
+          const momoRef = momoRefMatch ? momoRefMatch[1] : null;
 
-            <div className="receipt-divider"/>
-
-            <div className="receipt-info-grid">
-              <div className="receipt-info-block">
-                <div className="receipt-info-label">Customer</div>
-                <div className="receipt-info-value">{order.customer_name || '-'}</div>
-                {order.customer_phone && <div className="receipt-info-sub">{order.customer_phone}</div>}
-                {order.delivery_address && <div className="receipt-info-sub">{order.delivery_address}</div>}
-              </div>
-              <div className="receipt-info-block">
-                <div className="receipt-info-label">Rider</div>
-                <div className="receipt-info-value">{order.rider_name || 'Unassigned'}</div>
-                {order.rider_phone && <div className="receipt-info-sub">{order.rider_phone}</div>}
-              </div>
-              <div className="receipt-info-block">
-                <div className="receipt-info-label">Payment Method</div>
-                <div className="receipt-info-value">
-                  {order.payment_method ? order.payment_method.toUpperCase() : '-'}
-                </div>
-                {order.payment_method === 'momo' && order.momo_reference && (
-                  <div className="receipt-momo-ref">
-                    <span className="receipt-info-label">MoMo Ref: </span>
-                    <strong>{order.momo_reference}</strong>
+          return (
+            <div key={order.id} className="receipt-print-page">
+              {/* Header */}
+              <div className="receipt-print-header">
+                <div className="receipt-brand">
+                  <div className="receipt-logo">SW</div>
+                  <div>
+                    <div className="receipt-brand-name">Shore Winds</div>
+                    <div className="receipt-brand-sub">Official Receipt</div>
                   </div>
-                )}
-              </div>
-              <div className="receipt-info-block">
-                <div className="receipt-info-label">Status</div>
-                <div className="receipt-info-value receipt-status">
-                  {order.status ? order.status.toUpperCase() : '-'}
+                </div>
+                <div className="receipt-meta">
+                  <div className="receipt-order-num">{order.order_number}</div>
+                  <div className="receipt-date">{formatDate(order.created_at)}</div>
                 </div>
               </div>
-            </div>
 
-            <div className="receipt-divider"/>
+              <div className="receipt-divider"/>
 
-            {order.items && order.items.length > 0 && (
-              <>
-                <div className="receipt-section-title">Items Ordered</div>
+              {/* Info Grid */}
+              <div className="receipt-info-grid">
+                <div className="receipt-info-block">
+                  <div className="receipt-info-label">Customer</div>
+                  <div className="receipt-info-value">{order.customer_name || '-'}</div>
+                  {order.customer_phone && <div className="receipt-info-sub">{order.customer_phone}</div>}
+                  {order.delivery_address && <div className="receipt-info-sub">{order.delivery_address}</div>}
+                </div>
+                <div className="receipt-info-block">
+                  <div className="receipt-info-label">Rider</div>
+                  <div className="receipt-info-value">{order.rider_name || 'Unassigned'}</div>
+                  {order.rider_phone && <div className="receipt-info-sub">{order.rider_phone}</div>}
+                </div>
+                <div className="receipt-info-block">
+                  <div className="receipt-info-label">Payment</div>
+                  <div className="receipt-info-value">
+                    {isMomo ? 'MTN MoMo' : isCOD ? 'Cash on Delivery' : 'Cash'}
+                  </div>
+                  {isMomo && momoRef && (
+                    <div className="receipt-momo-ref">
+                      <span className="receipt-info-label">Ref: </span>
+                      <strong>{momoRef}</strong>
+                    </div>
+                  )}
+                  {isCOD && (
+                    <div className="receipt-momo-ref" style={{ background: '#fff7ed', borderColor: '#fed7aa', color: '#ea580c' }}>
+                      To be collected on delivery
+                    </div>
+                  )}
+                  {isCash && (
+                    <div className="receipt-momo-ref" style={{ background: '#f0fdf4', borderColor: '#bbf7d0', color: '#16a34a' }}>
+                      Paid in full
+                    </div>
+                  )}
+                </div>
+                <div className="receipt-info-block">
+                  <div className="receipt-info-label">Status</div>
+                  <div className="receipt-info-value receipt-status">{order.status ? order.status.toUpperCase() : '-'}</div>
+                  {order.notes && (
+                    <div className="receipt-info-sub" style={{ fontStyle: 'italic' }}>{order.notes}</div>
+                  )}
+                </div>
+              </div>
+
+              <div className="receipt-divider"/>
+
+              {/* Items */}
+              <div className="receipt-section-title">Items Ordered</div>
+              {items.length > 0 ? (
                 <table className="receipt-items-table">
                   <thead>
                     <tr>
@@ -291,7 +317,7 @@ const Receipts = () => {
                     </tr>
                   </thead>
                   <tbody>
-                    {order.items.map((item, i) => (
+                    {items.map((item, i) => (
                       <tr key={i}>
                         <td>{item.product_name}</td>
                         <td className="text-right">{item.quantity}</td>
@@ -301,39 +327,69 @@ const Receipts = () => {
                     ))}
                   </tbody>
                 </table>
-                <div className="receipt-divider"/>
-              </>
-            )}
+              ) : (
+                <div style={{ color: '#94a3b8', fontSize: '0.85rem', padding: '0.5rem 0' }}>No items found</div>
+              )}
 
-            <div className="receipt-totals">
-              {order.delivery_fee > 0 && (
-                <div className="receipt-total-row">
-                  <span>Delivery Fee</span>
-                  <span>{formatCurrency(order.delivery_fee)}</span>
+              <div className="receipt-divider"/>
+
+              {/* Totals */}
+              <div className="receipt-totals">
+                {order.delivery_fee > 0 && (
+                  <div className="receipt-total-row">
+                    <span>Delivery Fee</span>
+                    <span>{formatCurrency(order.delivery_fee)}</span>
+                  </div>
+                )}
+                {order.discount > 0 && (
+                  <div className="receipt-total-row">
+                    <span>Discount</span>
+                    <span>- {formatCurrency(order.discount)}</span>
+                  </div>
+                )}
+                <div className="receipt-total-row receipt-grand-total">
+                  <span>{isCOD ? 'Amount Due on Delivery' : 'Total Paid'}</span>
+                  <span>{formatCurrency(order.total_amount)}</span>
                 </div>
-              )}
-              {order.discount > 0 && (
-                <div className="receipt-total-row">
-                  <span>Discount</span>
-                  <span>- {formatCurrency(order.discount)}</span>
-                </div>
-              )}
-              <div className="receipt-total-row receipt-grand-total">
-                <span>Total Paid</span>
-                <span>{formatCurrency(order.total_amount)}</span>
               </div>
+
+              {/* MoMo notice */}
+              {isMomo && (
+                <>
+                  <div className="receipt-divider"/>
+                  <div style={{ fontSize: '0.78rem', color: '#475569', background: '#f0fdf4', border: '1px solid #bbf7d0', borderRadius: '6px', padding: '0.6rem 0.75rem' }}>
+                    <strong>MTN MoMo Payment</strong> — Funds sent to <strong>Shore Winds</strong>. Reference: <strong>{momoRef || 'N/A'}</strong>
+                  </div>
+                </>
+              )}
+
+              <div className="receipt-divider"/>
+
+              {/* Footer + QR */}
+              <div className="receipt-print-footer">
+                <div className="receipt-qr">
+                  <QRCodeSVG
+                    value={JSON.stringify({
+                      order: order.order_number,
+                      customer: order.customer_name,
+                      amount: order.total_amount,
+                      payment: isMomo ? 'MTN MoMo' : isCOD ? 'Cash on Delivery' : 'Cash',
+                      ref: momoRef || null,
+                      date: order.created_at,
+                    })}
+                    size={90}
+                    level="M"
+                  />
+                  <div style={{ fontSize: '0.7rem', color: '#94a3b8', marginTop: '0.4rem' }}>Scan to verify order</div>
+                </div>
+                <p>Thank you for shopping with us!</p>
+                <p>Shore Winds — Powered by ProCyclone</p>
+              </div>
+
+              {idx < selectedOrders.length - 1 && <div className="receipt-page-break"/>}
             </div>
-
-            <div className="receipt-divider"/>
-
-            <div className="receipt-print-footer">
-              <p>Thank you for your order!</p>
-              <p>ProCyclone — Ghana's Smart Commerce Platform</p>
-            </div>
-
-            {idx < selectedOrders.length - 1 && <div className="receipt-page-break"/>}
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
