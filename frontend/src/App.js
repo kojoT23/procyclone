@@ -16,6 +16,7 @@ import Inventory from './pages/Inventory';
 import Payments from './pages/Payments';
 import Reports from './pages/Reports';
 import Receipts from './pages/Receipts';
+import Billing from './pages/Billing';
 import './App.css';
 
 const Layout = ({ children }) => {
@@ -72,6 +73,7 @@ function App() {
           <Route path="/payments" element={<PrivateRoute><Layout><Payments /></Layout></PrivateRoute>} />
           <Route path="/reports" element={<PrivateRoute><Layout><Reports /></Layout></PrivateRoute>} />
           <Route path="/receipts" element={<PrivateRoute><Layout><Receipts /></Layout></PrivateRoute>} />
+          <Route path="/billing" element={<PrivateRoute><Layout><Billing /></Layout></PrivateRoute>} />
           <Route path="/users" element={<PrivateRoute><Layout><Staff /></Layout></PrivateRoute>} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
