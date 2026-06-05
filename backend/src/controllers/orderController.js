@@ -36,13 +36,13 @@ const getOrders = async (req, res) => {
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
     const countResult = await pool.query(
-      `SELECT COUNT(*) FROM orders o LEFT JOIN customers c ON o.customer_id = c.id LEFT JOIN deliveries d ON d.order_id = o.id LEFT JOIN riders r ON d.rider_id = r.id ${where}`,
+      `SELECT COUNT(*) FROM orders o LEFT JOIN customers c ON o.customer_id = c.id LEFT JOIN LATERAL (SELECT * FROM deliveries WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1) d ON true LEFT JOIN riders r ON d.rider_id = r.id ${where}`,
       values
     );
 
     const result = await pool.query(
-      `SELECT o.*, c.name as customer_name, c.phone as customer_phone, r.name as rider_name, r.phone as rider_phone, d.id as delivery_id, d.status as delivery_status
-       FROM orders o LEFT JOIN customers c ON o.customer_id = c.id LEFT JOIN deliveries d ON d.order_id = o.id LEFT JOIN riders r ON d.rider_id = r.id
+      `SELECT o.id, o.order_number, o.customer_id, o.status, o.payment_method, o.payment_status, o.total_amount, o.delivery_address, o.notes, o.created_at, o.updated_at, c.name as customer_name, c.phone as customer_phone, r.name as rider_name, r.phone as rider_phone, d.id as delivery_id, d.status as delivery_status
+       FROM orders o LEFT JOIN customers c ON o.customer_id = c.id LEFT JOIN LATERAL (SELECT * FROM deliveries WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1) d ON true LEFT JOIN riders r ON d.rider_id = r.id
        ${where} ORDER BY o.created_at DESC LIMIT $${i} OFFSET $${i + 1}`,
       [...values, limit, offset]
     );
@@ -65,8 +65,8 @@ const getOrder = async (req, res) => {
   try {
     const { id } = req.params;
     const order = await pool.query(
-      `SELECT o.*, c.name as customer_name, c.phone as customer_phone, r.name as rider_name, r.phone as rider_phone, d.id as delivery_id, d.status as delivery_status
-       FROM orders o LEFT JOIN customers c ON o.customer_id = c.id LEFT JOIN deliveries d ON d.order_id = o.id LEFT JOIN riders r ON d.rider_id = r.id WHERE o.id = $1`, [id]
+      `SELECT o.id, o.order_number, o.customer_id, o.status, o.payment_method, o.payment_status, o.total_amount, o.delivery_address, o.notes, o.created_at, o.updated_at, c.name as customer_name, c.phone as customer_phone, r.name as rider_name, r.phone as rider_phone, d.id as delivery_id, d.status as delivery_status
+       FROM orders o LEFT JOIN customers c ON o.customer_id = c.id LEFT JOIN LATERAL (SELECT * FROM deliveries WHERE order_id = o.id ORDER BY created_at DESC LIMIT 1) d ON true LEFT JOIN riders r ON d.rider_id = r.id WHERE o.id = $1`, [id]
     );
     if (order.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Order not found' });
