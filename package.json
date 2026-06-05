@@ -1,0 +1,13 @@
+{
+  "name": "procyclone",
+  "version": "1.0.0",
+  "scripts": {
+    "backend": "node src/index.js",
+    "storefront": "cd storefront && npm start",
+    "dev": "concurrently \"cd backend && node src/index.js\" \"cd storefront && npm start\"",
+    "admin": "cd frontend && npm start"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
