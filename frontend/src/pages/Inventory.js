@@ -1,54 +1,72 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import API from '../utils/api';
 
+/* ─── API ─────────────────────────────────────────────────────── */
 const inventoryAPI = {
-  getMovements: (params) => API.get('/inventory/movements', { params }),
-  adjustStock: (data) => API.post('/inventory/movements/adjust', data),
-  getSuppliers: (params) => API.get('/inventory/suppliers', { params }),
-  createSupplier: (data) => API.post('/inventory/suppliers', data),
-  updateSupplier: (id, data) => API.put(`/inventory/suppliers/${id}`, data),
-  getPurchaseOrders: (params) => API.get('/inventory/purchase-orders', { params }),
-  createPurchaseOrder: (data) => API.post('/inventory/purchase-orders', data),
-  receivePurchaseOrder: (id, data) => API.post(`/inventory/purchase-orders/${id}/receive`, data),
+  getMovements:        (params) => API.get('/inventory/movements', { params }),
+  adjustStock:         (data)   => API.post('/inventory/movements/adjust', data),
+  getSuppliers:        (params) => API.get('/inventory/suppliers', { params }),
+  createSupplier:      (data)   => API.post('/inventory/suppliers', data),
+  updateSupplier:      (id, data) => API.put(`/inventory/suppliers/${id}`, data),
+  getPurchaseOrders:   (params) => API.get('/inventory/purchase-orders', { params }),
+  createPurchaseOrder: (data)   => API.post('/inventory/purchase-orders', data),
+  receivePurchaseOrder:(id, data)=> API.post(`/inventory/purchase-orders/${id}/receive`, data),
 };
 
-const productsAPI_local = {
-  getAll: (params) => API.get('/products', { params }),
+const productsAPI_local = { getAll: (params) => API.get('/products', { params }) };
+
+/* ─── Movement type badge ─────────────────────────────────────── */
+const MovementBadge = ({ type }) => {
+  const cls =
+    type === 'purchase'   ? 'badge badge-green'  :
+    type === 'sale'       ? 'badge badge-blue'   :
+    type === 'return'     ? 'badge badge-purple' :
+    type === 'adjustment' ? 'badge badge-amber'  :
+    type === 'damage'     ? 'badge badge-red'    : 'badge badge-gray';
+  return <span className={cls}>{type}</span>;
 };
 
-const MOVEMENT_COLORS = {
-  purchase:   { bg: '#d4edda', text: '#155724' },
-  sale:       { bg: '#cce5ff', text: '#004085' },
-  return:     { bg: '#e2d9f3', text: '#4a235a' },
-  adjustment: { bg: '#fff3cd', text: '#856404' },
-  damage:     { bg: '#f8d7da', text: '#721c24' },
-  transfer:   { bg: '#d1ecf1', text: '#0c5460' },
+/* ─── PO status badge ─────────────────────────────────────────── */
+const POBadge = ({ status }) => {
+  const cls =
+    status === 'received'  ? 'badge badge-green'  :
+    status === 'partial'   ? 'badge badge-blue'   :
+    status === 'cancelled' ? 'badge badge-red'    : 'badge badge-amber';
+  return <span className={cls}>{status}</span>;
 };
 
-// ── Stock Movements Tab ────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════
+   TAB: Stock Movements
+═══════════════════════════════════════════════════════════════ */
 const MovementsTab = () => {
-  const [movements, setMovements] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [products, setProducts] = useState([]);
-  const [showModal, setShowModal] = useState(false);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ product_id: '', type: 'adjustment', quantity: '', notes: '' });
+  const [movements,  setMovements]  = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [products,   setProducts]   = useState([]);
+  const [page,       setPage]       = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total,      setTotal]      = useState(0);
+  const [showModal,  setShowModal]  = useState(false);
+  const [saving,     setSaving]     = useState(false);
+  const [form,       setForm]       = useState({ product_id: '', type: 'adjustment', quantity: '', notes: '' });
+  const PAGE_SIZE = 20;
 
   const fetchData = useCallback(async () => {
     try {
       setLoading(true);
       const [movRes, prodRes] = await Promise.all([
-        inventoryAPI.getMovements({ limit: 50 }),
+        inventoryAPI.getMovements({ limit: PAGE_SIZE, page }),
         productsAPI_local.getAll({ limit: 100 }),
       ]);
       setMovements(movRes.data.movements || []);
+      setTotal(movRes.data.total || 0);
+      setTotalPages(Math.max(1, Math.ceil((movRes.data.total || 0) / PAGE_SIZE)));
       setProducts(prodRes.data.products || []);
     } catch (err) {
       console.error(err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -69,61 +87,64 @@ const MovementsTab = () => {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '16px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <span className="pagination-info">{total} movements</span>
         <button className="btn btn-primary" onClick={() => setShowModal(true)}>+ Adjust Stock</button>
       </div>
 
       <div className="card">
         {loading ? (
-          <div className="loading">Loading movements...</div>
+          <div className="loading">
+            <div className="loading-spinner" />
+            <span className="loading-text">Loading movements…</span>
+          </div>
         ) : movements.length === 0 ? (
           <div className="empty-state">
-            <div style={{ fontSize: '40px', marginBottom: '12px' }}>📋</div>
+            <div className="empty-icon">📋</div>
             <h3>No stock movements yet</h3>
             <p>Stock changes will appear here automatically</p>
           </div>
         ) : (
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Product</th>
-                  <th>Type</th>
-                  <th>Quantity</th>
-                  <th>Notes</th>
-                  <th>Date</th>
-                </tr>
-              </thead>
-              <tbody>
-                {movements.map(m => (
-                  <tr key={m.id}>
-                    <td style={{ fontWeight: '600' }}>{m.product_name}</td>
-                    <td>
-                      <span style={{
-                        background: MOVEMENT_COLORS[m.type]?.bg || '#eee',
-                        color: MOVEMENT_COLORS[m.type]?.text || '#333',
-                        padding: '3px 10px', borderRadius: '20px',
-                        fontSize: '11px', fontWeight: '600', textTransform: 'capitalize',
-                      }}>
-                        {m.type}
-                      </span>
-                    </td>
-                    <td style={{
-                      fontWeight: '700',
-                      color: m.quantity > 0 ? '#2ecc71' : '#e74c3c',
-                      fontSize: '15px',
-                    }}>
-                      {m.quantity > 0 ? '+' : ''}{m.quantity}
-                    </td>
-                    <td style={{ color: '#666', fontSize: '13px' }}>{m.notes || '—'}</td>
-                    <td style={{ color: '#888', fontSize: '12px', whiteSpace: 'nowrap' }}>
-                      {new Date(m.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
-                    </td>
+          <>
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Type</th>
+                    <th>Quantity</th>
+                    <th>Notes</th>
+                    <th>Date</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                </thead>
+                <tbody>
+                  {movements.map(m => (
+                    <tr key={m.id}>
+                      <td style={{ fontWeight: '600' }}>{m.product_name}</td>
+                      <td><MovementBadge type={m.type} /></td>
+                      <td style={{
+                        fontWeight: '700', fontSize: '15px',
+                        color: m.quantity > 0 ? 'var(--accent, #22c55e)' : '#ef4444',
+                      }}>
+                        {m.quantity > 0 ? '+' : ''}{m.quantity}
+                      </td>
+                      <td style={{ color: 'var(--text-2)', fontSize: '13px' }}>{m.notes || '—'}</td>
+                      <td style={{ color: 'var(--text-3)', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                        {new Date(m.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {totalPages > 1 && (
+              <div className="pagination" style={{ marginTop: '16px' }}>
+                <span className="pagination-info">Page {page} of {totalPages}</span>
+                <button className="btn btn-secondary btn-sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>← Prev</button>
+                <button className="btn btn-secondary btn-sm" disabled={page === totalPages} onClick={() => setPage(p => p + 1)}>Next →</button>
+              </div>
+            )}
+          </>
         )}
       </div>
 
@@ -132,12 +153,12 @@ const MovementsTab = () => {
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2 className="modal-title">Adjust Stock</h2>
-              <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+              <button className="modal-close" onClick={() => setShowModal(false)}>✕</button>
             </div>
             <div className="form-group">
               <label className="form-label">Product *</label>
               <select className="form-input" value={form.product_id} onChange={e => setForm(f => ({ ...f, product_id: e.target.value }))}>
-                <option value="">Select product...</option>
+                <option value="">Select product…</option>
                 {products.map(p => <option key={p.id} value={p.id}>{p.name} (Stock: {p.stock_quantity})</option>)}
               </select>
             </div>
@@ -149,21 +170,22 @@ const MovementsTab = () => {
                   <option value="return">Return</option>
                   <option value="damage">Damage</option>
                   <option value="transfer">Transfer</option>
+                  <option value="purchase">Purchase</option>
                 </select>
               </div>
               <div className="form-group">
                 <label className="form-label">Quantity *</label>
-                <input className="form-input" type="number" min="1" value={form.quantity} onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))} placeholder="0" />
+                <input className="form-input" type="number" value={form.quantity} onChange={e => setForm(f => ({ ...f, quantity: e.target.value }))} placeholder="Use negative for removals" />
               </div>
             </div>
             <div className="form-group">
               <label className="form-label">Notes</label>
-              <textarea className="form-input" rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Reason for adjustment..." />
+              <textarea className="form-input" rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Reason for adjustment…" />
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowModal(false)}>Cancel</button>
               <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleAdjust} disabled={saving}>
-                {saving ? 'Saving...' : 'Adjust Stock'}
+                {saving ? 'Saving…' : 'Adjust Stock'}
               </button>
             </div>
           </div>
@@ -173,19 +195,21 @@ const MovementsTab = () => {
   );
 };
 
-// ── Suppliers Tab ──────────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════
+   TAB: Suppliers
+═══════════════════════════════════════════════════════════════ */
 const SuppliersTab = () => {
   const [suppliers, setSuppliers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [loading,   setLoading]   = useState(true);
   const [showModal, setShowModal] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: '', phone: '', email: '', address: '', notes: '' });
+  const [editing,   setEditing]   = useState(null);
+  const [saving,    setSaving]    = useState(false);
+  const [form,      setForm]      = useState({ name: '', phone: '', email: '', address: '', notes: '' });
 
   const fetchSuppliers = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await inventoryAPI.getSuppliers({ limit: 50 });
+      const res = await inventoryAPI.getSuppliers({ limit: 100 });
       setSuppliers(res.data.suppliers || []);
     } catch (err) {
       console.error(err);
@@ -202,9 +226,9 @@ const SuppliersTab = () => {
     setShowModal(true);
   };
 
-  const openEdit = (supplier) => {
-    setEditing(supplier);
-    setForm({ name: supplier.name || '', phone: supplier.phone || '', email: supplier.email || '', address: supplier.address || '', notes: supplier.notes || '' });
+  const openEdit = (s) => {
+    setEditing(s);
+    setForm({ name: s.name || '', phone: s.phone || '', email: s.email || '', address: s.address || '', notes: s.notes || '' });
     setShowModal(true);
   };
 
@@ -212,11 +236,9 @@ const SuppliersTab = () => {
     if (!form.name) return alert('Supplier name is required');
     try {
       setSaving(true);
-      if (editing) {
-        await inventoryAPI.updateSupplier(editing.id, form);
-      } else {
-        await inventoryAPI.createSupplier(form);
-      }
+      editing
+        ? await inventoryAPI.updateSupplier(editing.id, form)
+        : await inventoryAPI.createSupplier(form);
       setShowModal(false);
       fetchSuppliers();
     } catch (err) {
@@ -234,12 +256,15 @@ const SuppliersTab = () => {
 
       <div className="card">
         {loading ? (
-          <div className="loading">Loading suppliers...</div>
+          <div className="loading">
+            <div className="loading-spinner" />
+            <span className="loading-text">Loading suppliers…</span>
+          </div>
         ) : suppliers.length === 0 ? (
           <div className="empty-state">
-            <div style={{ fontSize: '40px', marginBottom: '12px' }}>🏭</div>
+            <div className="empty-icon">🏭</div>
             <h3>No suppliers yet</h3>
-            <p>Add your product suppliers here</p>
+            <p>Add suppliers to use them in purchase orders</p>
             <button className="btn btn-primary" style={{ marginTop: '16px' }} onClick={openAdd}>+ Add Supplier</button>
           </div>
         ) : (
@@ -251,6 +276,7 @@ const SuppliersTab = () => {
                   <th>Phone</th>
                   <th>Email</th>
                   <th>Address</th>
+                  <th>Notes</th>
                   <th>Actions</th>
                 </tr>
               </thead>
@@ -258,11 +284,12 @@ const SuppliersTab = () => {
                 {suppliers.map(s => (
                   <tr key={s.id}>
                     <td style={{ fontWeight: '600' }}>{s.name}</td>
-                    <td>{s.phone || '—'}</td>
-                    <td style={{ color: '#666', fontSize: '13px' }}>{s.email || '—'}</td>
-                    <td style={{ color: '#666', fontSize: '13px' }}>{s.address || '—'}</td>
+                    <td style={{ fontFamily: 'monospace', fontSize: '13px' }}>{s.phone || '—'}</td>
+                    <td style={{ color: 'var(--text-2)', fontSize: '13px' }}>{s.email || '—'}</td>
+                    <td style={{ color: 'var(--text-2)', fontSize: '13px' }}>{s.address || '—'}</td>
+                    <td style={{ color: 'var(--text-3)', fontSize: '12px' }}>{s.notes || '—'}</td>
                     <td>
-                      <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => openEdit(s)}>Edit</button>
+                      <button className="btn btn-secondary btn-sm" onClick={() => openEdit(s)}>Edit</button>
                     </td>
                   </tr>
                 ))}
@@ -277,7 +304,7 @@ const SuppliersTab = () => {
           <div className="modal" onClick={e => e.stopPropagation()}>
             <div className="modal-header">
               <h2 className="modal-title">{editing ? 'Edit Supplier' : 'Add Supplier'}</h2>
-              <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+              <button className="modal-close" onClick={() => setShowModal(false)}>✕</button>
             </div>
             <div className="form-group">
               <label className="form-label">Supplier Name *</label>
@@ -299,12 +326,12 @@ const SuppliersTab = () => {
             </div>
             <div className="form-group">
               <label className="form-label">Notes</label>
-              <textarea className="form-input" rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Any notes about this supplier..." />
+              <textarea className="form-input" rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Any notes about this supplier…" />
             </div>
             <div style={{ display: 'flex', gap: '8px' }}>
               <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowModal(false)}>Cancel</button>
               <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving...' : editing ? 'Save Changes' : 'Add Supplier'}
+                {saving ? 'Saving…' : editing ? 'Save Changes' : 'Add Supplier'}
               </button>
             </div>
           </div>
@@ -314,16 +341,35 @@ const SuppliersTab = () => {
   );
 };
 
-// ── Purchase Orders Tab ────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════
+   TAB: Purchase Orders
+═══════════════════════════════════════════════════════════════ */
 const PurchaseOrdersTab = () => {
-  const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const [orders,    setOrders]    = useState([]);
+  const [loading,   setLoading]   = useState(true);
+  const [suppliers, setSuppliers] = useState([]);
+  const [products,  setProducts]  = useState([]);
+  const [showModal, setShowModal] = useState(false);
+  const [saving,    setSaving]    = useState(false);
+  const [receiving, setReceiving] = useState(null);
+  const [form,      setForm]      = useState({
+    supplier_id: '', expected_date: '', notes: '', items: [],
+  });
+  const [selProduct, setSelProduct] = useState('');
+  const [selQty,     setSelQty]     = useState(1);
+  const [selCost,    setSelCost]    = useState('');
 
   const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
-      const res = await inventoryAPI.getPurchaseOrders({ limit: 50 });
-      setOrders(res.data.purchase_orders || []);
+      const [ordRes, supRes, prodRes] = await Promise.all([
+        inventoryAPI.getPurchaseOrders({ limit: 50 }),
+        inventoryAPI.getSuppliers({ limit: 100 }),
+        productsAPI_local.getAll({ limit: 100 }),
+      ]);
+      setOrders(ordRes.data.purchase_orders || []);
+      setSuppliers(supRes.data.suppliers || []);
+      setProducts(prodRes.data.products || []);
     } catch (err) {
       console.error(err);
     } finally {
@@ -333,23 +379,79 @@ const PurchaseOrdersTab = () => {
 
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
 
-  const STATUS_COLORS = {
-    pending:   { bg: '#fff3cd', text: '#856404' },
-    received:  { bg: '#d4edda', text: '#155724' },
-    partial:   { bg: '#cce5ff', text: '#004085' },
-    cancelled: { bg: '#f8d7da', text: '#721c24' },
+  /* Add item to PO */
+  const addItem = () => {
+    if (!selProduct || !selQty || !selCost) return alert('Select product, quantity and cost price');
+    const product = products.find(p => p.id === parseInt(selProduct));
+    if (!product) return;
+    const existing = form.items.find(i => i.product_id === product.id);
+    if (existing) {
+      setForm(f => ({ ...f, items: f.items.map(i => i.product_id === product.id ? { ...i, quantity: i.quantity + selQty, cost_price: parseFloat(selCost) } : i) }));
+    } else {
+      setForm(f => ({ ...f, items: [...f.items, { product_id: product.id, name: product.name, quantity: selQty, cost_price: parseFloat(selCost) }] }));
+    }
+    setSelProduct(''); setSelQty(1); setSelCost('');
+  };
+
+  const removeItem = (pid) => setForm(f => ({ ...f, items: f.items.filter(i => i.product_id !== pid) }));
+
+  const poTotal = form.items.reduce((s, i) => s + i.cost_price * i.quantity, 0);
+
+  /* Create PO */
+  const handleCreate = async () => {
+    if (!form.supplier_id)      return alert('Please select a supplier');
+    if (!form.items.length)     return alert('Please add at least one product');
+    try {
+      setSaving(true);
+      await inventoryAPI.createPurchaseOrder({
+        supplier_id:   parseInt(form.supplier_id),
+        expected_date: form.expected_date || null,
+        notes:         form.notes,
+        items:         form.items.map(i => ({ product_id: i.product_id, quantity: i.quantity, cost_price: i.cost_price })),
+      });
+      setShowModal(false);
+      setForm({ supplier_id: '', expected_date: '', notes: '', items: [] });
+      fetchOrders();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error creating purchase order');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  /* Mark received */
+  const handleReceive = async (po) => {
+    if (!window.confirm(`Mark PO ${po.reference} as received? This will update stock levels.`)) return;
+    try {
+      setReceiving(po.id);
+      await inventoryAPI.receivePurchaseOrder(po.id, {});
+      fetchOrders();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error receiving purchase order');
+    } finally {
+      setReceiving(null);
+    }
   };
 
   return (
     <div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+        <span className="pagination-info">{orders.length} purchase orders</span>
+        <button className="btn btn-primary" onClick={() => setShowModal(true)}>+ New Purchase Order</button>
+      </div>
+
       <div className="card">
         {loading ? (
-          <div className="loading">Loading purchase orders...</div>
+          <div className="loading">
+            <div className="loading-spinner" />
+            <span className="loading-text">Loading purchase orders…</span>
+          </div>
         ) : orders.length === 0 ? (
           <div className="empty-state">
-            <div style={{ fontSize: '40px', marginBottom: '12px' }}>📋</div>
+            <div className="empty-icon">📦</div>
             <h3>No purchase orders yet</h3>
-            <p>Purchase orders will appear here when created</p>
+            <p>Create a purchase order to restock from a supplier</p>
+            <button className="btn btn-primary" style={{ marginTop: '16px' }} onClick={() => setShowModal(true)}>+ New Purchase Order</button>
           </div>
         ) : (
           <div className="table-wrapper">
@@ -360,27 +462,41 @@ const PurchaseOrdersTab = () => {
                   <th>Supplier</th>
                   <th>Status</th>
                   <th>Total</th>
+                  <th>Expected</th>
                   <th>Date</th>
+                  <th>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {orders.map(po => (
                   <tr key={po.id}>
-                    <td style={{ fontWeight: '600' }}>{po.reference}</td>
-                    <td>{po.supplier_name || '—'}</td>
-                    <td>
-                      <span style={{
-                        background: STATUS_COLORS[po.status]?.bg || '#eee',
-                        color: STATUS_COLORS[po.status]?.text || '#333',
-                        padding: '3px 10px', borderRadius: '20px',
-                        fontSize: '11px', fontWeight: '600', textTransform: 'capitalize',
-                      }}>
-                        {po.status}
-                      </span>
+                    <td style={{ fontWeight: '600', fontFamily: 'monospace', fontSize: '12px' }}>{po.reference}</td>
+                    <td style={{ fontWeight: '500' }}>{po.supplier_name || '—'}</td>
+                    <td><POBadge status={po.status} /></td>
+                    <td style={{ fontWeight: '700', color: 'var(--accent, #22c55e)' }}>
+                      GH₵ {parseFloat(po.total_amount || 0).toFixed(2)}
                     </td>
-                    <td style={{ fontWeight: '600' }}>GH₵ {parseFloat(po.total_amount || 0).toFixed(2)}</td>
-                    <td style={{ color: '#888', fontSize: '12px' }}>
+                    <td style={{ color: 'var(--text-3)', fontSize: '12px' }}>
+                      {po.expected_date
+                        ? new Date(po.expected_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })
+                        : '—'}
+                    </td>
+                    <td style={{ color: 'var(--text-3)', fontSize: '12px', whiteSpace: 'nowrap' }}>
                       {new Date(po.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}
+                    </td>
+                    <td>
+                      {po.status === 'pending' && (
+                        <button
+                          className="btn btn-success btn-sm"
+                          onClick={() => handleReceive(po)}
+                          disabled={receiving === po.id}
+                        >
+                          {receiving === po.id ? 'Receiving…' : '✓ Mark Received'}
+                        </button>
+                      )}
+                      {po.status !== 'pending' && (
+                        <span className="badge badge-green">✓ Done</span>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -389,18 +505,90 @@ const PurchaseOrdersTab = () => {
           </div>
         )}
       </div>
+
+      {/* Create PO Modal */}
+      {showModal && (
+        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+          <div className="modal" style={{ maxWidth: '580px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">New Purchase Order</h2>
+              <button className="modal-close" onClick={() => setShowModal(false)}>✕</button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div className="form-group">
+                <label className="form-label">Supplier *</label>
+                <select className="form-input" value={form.supplier_id} onChange={e => setForm(f => ({ ...f, supplier_id: e.target.value }))}>
+                  <option value="">Select supplier…</option>
+                  {suppliers.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+              </div>
+              <div className="form-group">
+                <label className="form-label">Expected Delivery</label>
+                <input className="form-input" type="date" value={form.expected_date} onChange={e => setForm(f => ({ ...f, expected_date: e.target.value }))} />
+              </div>
+            </div>
+
+            {/* Add products */}
+            <div className="form-group">
+              <label className="form-label">Add Products *</label>
+              <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <select className="form-input" style={{ flex: 2, minWidth: '160px' }} value={selProduct} onChange={e => setSelProduct(e.target.value)}>
+                  <option value="">Select product…</option>
+                  {products.map(p => <option key={p.id} value={p.id}>{p.name} (Stock: {p.stock_quantity})</option>)}
+                </select>
+                <input className="form-input" type="number" min="1" value={selQty} onChange={e => setSelQty(parseInt(e.target.value) || 1)} style={{ width: '65px' }} placeholder="Qty" />
+                <input className="form-input" type="number" min="0" step="0.01" value={selCost} onChange={e => setSelCost(e.target.value)} style={{ width: '90px' }} placeholder="Cost (GH₵)" />
+                <button className="btn btn-primary" onClick={addItem}>Add</button>
+              </div>
+            </div>
+
+            {/* Items list */}
+            {form.items.length > 0 && (
+              <div style={{ background: 'var(--bg)', borderRadius: '8px', padding: '12px', marginBottom: '16px' }}>
+                {form.items.map(item => (
+                  <div key={item.product_id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '6px 0', borderBottom: '1px solid var(--border)' }}>
+                    <span style={{ flex: 1, fontWeight: '500', fontSize: '13px' }}>{item.name}</span>
+                    <span style={{ color: 'var(--text-3)', fontSize: '12px' }}>{item.quantity} × GH₵ {item.cost_price.toFixed(2)}</span>
+                    <span style={{ fontWeight: '700', color: 'var(--accent)' }}>GH₵ {(item.quantity * item.cost_price).toFixed(2)}</span>
+                    <button style={{ background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: '16px' }} onClick={() => removeItem(item.product_id)}>✕</button>
+                  </div>
+                ))}
+                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '10px', fontWeight: '800', fontSize: '15px' }}>
+                  <span>Total</span>
+                  <span style={{ color: 'var(--accent)' }}>GH₵ {poTotal.toFixed(2)}</span>
+                </div>
+              </div>
+            )}
+
+            <div className="form-group">
+              <label className="form-label">Notes</label>
+              <textarea className="form-input" rows={2} value={form.notes} onChange={e => setForm(f => ({ ...f, notes: e.target.value }))} placeholder="Any notes about this order…" />
+            </div>
+
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowModal(false)}>Cancel</button>
+              <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleCreate} disabled={saving}>
+                {saving ? 'Creating…' : `Create PO — GH₵ ${poTotal.toFixed(2)}`}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
 
-// ── Main Inventory Page ────────────────────────────────────────
+/* ═══════════════════════════════════════════════════════════════
+   MAIN INVENTORY PAGE
+═══════════════════════════════════════════════════════════════ */
 const Inventory = () => {
   const [activeTab, setActiveTab] = useState('movements');
 
   const tabs = [
-    { key: 'movements', label: '📋 Stock Movements' },
-    { key: 'suppliers', label: '🏭 Suppliers' },
-    { key: 'purchase_orders', label: '📦 Purchase Orders' },
+    { key: 'movements',      label: '📋 Stock Movements' },
+    { key: 'suppliers',      label: '🏭 Suppliers' },
+    { key: 'purchase_orders',label: '📦 Purchase Orders' },
   ];
 
   return (
@@ -408,36 +596,24 @@ const Inventory = () => {
       <div className="page-header">
         <div>
           <h1 className="page-title">Inventory</h1>
-          <p style={{ color: '#888', fontSize: '13px', margin: '4px 0 0' }}>Stock movements, suppliers and purchase orders</p>
+          <p className="page-subtitle">Stock movements, suppliers and purchase orders</p>
         </div>
       </div>
 
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: '4px', marginBottom: '20px', borderBottom: '2px solid #e5e7eb', flexWrap: 'wrap' }}>
+      <div className="tabs" style={{ marginBottom: '20px' }}>
         {tabs.map(tab => (
           <button
             key={tab.key}
+            className={`tab-btn${activeTab === tab.key ? ' active' : ''}`}
             onClick={() => setActiveTab(tab.key)}
-            style={{
-              padding: '10px 16px',
-              border: 'none',
-              background: 'none',
-              cursor: 'pointer',
-              fontSize: '13px',
-              fontWeight: activeTab === tab.key ? '600' : '400',
-              color: activeTab === tab.key ? '#1a1a2e' : '#888',
-              borderBottom: activeTab === tab.key ? '2px solid #1a1a2e' : '2px solid transparent',
-              marginBottom: '-2px',
-              whiteSpace: 'nowrap',
-            }}
           >
             {tab.label}
           </button>
         ))}
       </div>
 
-      {activeTab === 'movements' && <MovementsTab />}
-      {activeTab === 'suppliers' && <SuppliersTab />}
+      {activeTab === 'movements'       && <MovementsTab />}
+      {activeTab === 'suppliers'       && <SuppliersTab />}
       {activeTab === 'purchase_orders' && <PurchaseOrdersTab />}
     </div>
   );

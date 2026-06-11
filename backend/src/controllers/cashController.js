@@ -2,7 +2,7 @@ const pool = require('../config/db');
 
 const getCashLogs = async (req, res) => {
   try {
-    const { rider_id, status, page = 1, limit = 20 } = req.query;
+    const { rider_id, status, date, page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
     const conditions = [];
     const values = [];
@@ -10,6 +10,7 @@ const getCashLogs = async (req, res) => {
 
     if (rider_id) { conditions.push(`cl.rider_id = $${i++}`); values.push(rider_id); }
     if (status) { conditions.push(`cl.status = $${i++}`); values.push(status); }
+    if (date) { conditions.push(`DATE(cl.created_at) = $${i++}`); values.push(date); }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
@@ -99,7 +100,6 @@ const disputeCashLog = async (req, res) => {
 
 const getDailyReport = async (req, res) => {
   try {
-    const { date } = req.query;
     const targetDate = date || new Date().toISOString().split('T')[0];
 
     // Total orders today

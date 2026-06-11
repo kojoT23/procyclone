@@ -101,6 +101,13 @@ const verifyPayment = async (req, res) => {
       [payment.rows[0].order_id]
     );
 
+
+    // Sync cash_logs — if COD/cash, mark any pending cash log as verified
+    await client.query(
+      `UPDATE cash_logs SET status = 'verified', verified_at = NOW()
+       WHERE order_id = $1 AND status = 'pending'`,
+      [payment.rows[0].order_id]
+    );
     await client.query('COMMIT');
 
     res.json({

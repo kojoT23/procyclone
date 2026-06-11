@@ -49,7 +49,7 @@ const Login = () => {
             fontSize: '26px', margin: '0 auto 16px', boxShadow: '0 8px 24px rgba(34,197,94,0.3)',
           }}>🚲</div>
           <h1 style={{ color: 'white', fontSize: '24px', fontWeight: '700', margin: '0 0 6px', letterSpacing: '-0.5px' }}>
-            ProCyclone
+            Shorewinds
           </h1>
           <p style={{ color: 'rgba(255,255,255,0.4)', fontSize: '13px', margin: 0 }}>
             Sign in to your dashboard
@@ -80,7 +80,7 @@ const Login = () => {
                 type="email"
                 value={email}
                 onChange={e => setEmail(e.target.value)}
-                placeholder="you@procyclone.com"
+                placeholder="you@shorewinds.com"
                 required
                 autoFocus
               />
@@ -123,7 +123,7 @@ const Login = () => {
         </div>
 
         <p style={{ textAlign: 'center', marginTop: '24px', color: 'rgba(255,255,255,0.2)', fontSize: '12px' }}>
-          © 2024 ProCyclone — Ghana
+          © 2026 Shorewinds — Ghana
         </p>
       </div>
     </div>

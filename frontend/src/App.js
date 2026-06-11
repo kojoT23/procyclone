@@ -1,9 +1,9 @@
-
 import React, { useState } from 'react';
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider } from './context/AuthContext';
 import PrivateRoute from './components/PrivateRoute';
 import Sidebar from './components/Sidebar';
+import Navbar from './components/Navbar';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
 import Orders from './pages/Orders';
@@ -17,39 +17,18 @@ import Payments from './pages/Payments';
 import Reports from './pages/Reports';
 import Receipts from './pages/Receipts';
 import Billing from './pages/Billing';
+import Settings from './pages/Settings';
+import DeliveryBoard from './pages/DeliveryBoard';
 import './App.css';
 
 const Layout = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
   return (
-    <div style={{ display: 'flex', minHeight: '100vh' }}>
+    <div style={{ display: 'flex', minHeight: '100vh', width: '100%', overflow: 'hidden' }}>
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
       <div className="main-content">
-        <div className="mobile-topbar">
-          <button
-            onClick={() => setSidebarOpen(true)}
-            style={{
-              background: 'none', border: 'none', cursor: 'pointer',
-              padding: '6px', borderRadius: '6px', color: 'var(--navy)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-            }}
-          >
-            <svg width="20" height="20" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M4 6h16M4 12h16M4 18h16" />
-            </svg>
-          </button>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <div style={{
-              width: '24px', height: '24px', borderRadius: '6px',
-              background: 'linear-gradient(135deg, #22c55e, #16a34a)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '12px',
-            }}>🚲</div>
-            <span style={{ fontWeight: '700', fontSize: '15px', color: 'var(--navy)', letterSpacing: '-0.3px' }}>ProCyclone</span>
-          </div>
-          <div style={{ width: '32px' }} />
-        </div>
-        <div style={{ padding: '32px', maxWidth: '1200px' }}>
+        <Navbar onMenuOpen={() => setSidebarOpen(true)} />
+        <div style={{ padding: '28px 32px 56px', width: '100%', boxSizing: 'border-box' }}>
           {children}
         </div>
       </div>
@@ -75,6 +54,8 @@ function App() {
           <Route path="/receipts" element={<PrivateRoute><Layout><Receipts /></Layout></PrivateRoute>} />
           <Route path="/billing" element={<PrivateRoute><Layout><Billing /></Layout></PrivateRoute>} />
           <Route path="/users" element={<PrivateRoute><Layout><Staff /></Layout></PrivateRoute>} />
+          <Route path="/settings" element={<PrivateRoute><Layout><Settings /></Layout></PrivateRoute>} />
+<Route path="/delivery" element={<PrivateRoute><Layout><DeliveryBoard /></Layout></PrivateRoute>} />
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </BrowserRouter>

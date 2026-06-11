@@ -58,14 +58,14 @@ const requestReset = async (req, res) => {
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
 
     await resend.emails.send({
-      from: 'ProCyclone <onboarding@resend.dev>',
+      from: 'Shorewinds <onboarding@resend.dev>',
       to: user.email,
-      subject: 'ProCyclone — Password Reset Request',
+      subject: 'Shorewinds — Password Reset Request',
       html: `
         <div style="font-family: Arial, sans-serif; max-width: 500px; margin: 0 auto;">
           <h2 style="color: #1a1a18;">Password Reset Request</h2>
           <p>Hi ${user.name},</p>
-          <p>Someone requested a password reset for your ProCyclone account.</p>
+          <p>Someone requested a password reset for your Shorewinds account.</p>
           <p>Click the button below to reset your password. This link expires in <strong>1 hour</strong>.</p>
           <a href="${resetUrl}" 
              style="display: inline-block; background: #D85A30; color: white; 

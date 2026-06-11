@@ -1,37 +1,184 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { usersAPI } from '../utils/api';
+import { useAuth } from '../context/AuthContext';
 
-const ROLE_COLORS = {
-  super_admin: { bg: '#f8d7da', text: '#721c24' },
-  admin:       { bg: '#ffd6a5', text: '#7d4e00' },
-  manager:     { bg: '#cce5ff', text: '#004085' },
-  cashier:     { bg: '#d4edda', text: '#155724' },
-  dispatcher:  { bg: '#e2d9f3', text: '#4a235a' },
-  warehouse:   { bg: '#d1ecf1', text: '#0c5460' },
-  rider:       { bg: '#fff3cd', text: '#856404' },
-};
-
+/* ─── Constants ───────────────────────────────────────────────── */
 const ROLES = ['super_admin','admin','manager','cashier','dispatcher','warehouse','rider'];
 
-const Staff = () => {
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [total, setTotal] = useState(0);
-  const [page, setPage] = useState(1);
-  const [pages, setPages] = useState(1);
-  const [search, setSearch] = useState('');
-  const [filterRole, setFilterRole] = useState('');
-  const [showModal, setShowModal] = useState(false);
-  const [editing, setEditing] = useState(null);
-  const [saving, setSaving] = useState(false);
-  const [form, setForm] = useState({ name: '', email: '', password: '', role: 'cashier', phone: '' });
+const ROLE_BADGE = {
+  super_admin: 'badge badge-red',
+  admin:       'badge badge-amber',
+  manager:     'badge badge-blue',
+  cashier:     'badge badge-green',
+  dispatcher:  'badge badge-purple',
+  warehouse:   'badge badge-teal',
+  rider:       'badge badge-gray',
+};
 
+const ROLE_AVATAR = {
+  super_admin: '#dc2626', admin: '#d97706', manager: '#1d4ed8',
+  cashier: '#16a34a', dispatcher: '#7c3aed', warehouse: '#0f766e', rider: '#475569',
+};
+
+const EMPTY_FORM = {
+  // Account
+  name: '', email: '', password: '', role: 'cashier', phone: '',
+  // Personal
+  date_of_birth: '', gender: '', address: '',
+  ghana_card_number: '', start_date: '',
+  // Emergency
+  emergency_name: '', emergency_phone: '', emergency_relation: '',
+  // Photo + notes
+  passport_photo: '', notes: '',
+};
+
+/* ─── Staff profile card ──────────────────────────────────────── */
+const ProfileCard = ({ user, onEdit, onDelete, onToggle, currentUser }) => {
+  const isSelf       = user.id === currentUser?.id;
+  const isSuperAdmin = currentUser?.role === 'super_admin';
+  const initials     = user.name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+
+  return (
+    <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 0, padding: 0, overflow: 'hidden' }}>
+      {/* Coloured top strip */}
+      <div style={{ height: '6px', background: ROLE_AVATAR[user.role] || '#94a3b8' }} />
+
+      <div style={{ padding: '20px' }}>
+        {/* Avatar + name */}
+        <div style={{ display: 'flex', gap: '14px', alignItems: 'flex-start', marginBottom: '16px' }}>
+          <div style={{ flexShrink: 0 }}>
+            {user.passport_photo ? (
+              <img
+                src={user.passport_photo}
+                alt={user.name}
+                style={{ width: '56px', height: '56px', borderRadius: '50%', objectFit: 'cover', border: '3px solid #f1f5f9' }}
+              />
+            ) : (
+              <div style={{
+                width: '56px', height: '56px', borderRadius: '50%',
+                background: ROLE_AVATAR[user.role] || '#64748b',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                color: '#fff', fontWeight: '800', fontSize: '18px', flexShrink: 0,
+              }}>
+                {initials}
+              </div>
+            )}
+          </div>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <p style={{ fontWeight: '700', fontSize: '15px', margin: 0 }}>{user.name}</p>
+              {isSelf && <span className="badge badge-navy" style={{ fontSize: '10px' }}>You</span>}
+            </div>
+            <span className={ROLE_BADGE[user.role] || 'badge badge-gray'} style={{ marginTop: '4px', display: 'inline-block' }}>
+              {user.role?.replace('_', ' ')}
+            </span>
+          </div>
+          <span className={`badge ${user.is_active ? 'badge-green' : 'badge-red'}`} style={{ flexShrink: 0 }}>
+            {user.is_active ? 'Active' : 'Inactive'}
+          </span>
+        </div>
+
+        {/* Details */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', color: 'var(--text-2)', marginBottom: '16px' }}>
+          <div style={{ display: 'flex', gap: '8px' }}>
+            <span>📧</span>
+            <span style={{ wordBreak: 'break-all' }}>{user.email}</span>
+          </div>
+          {user.phone && (
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <span>📞</span><span>{user.phone}</span>
+            </div>
+          )}
+          {user.address && (
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <span>📍</span><span>{user.address}</span>
+            </div>
+          )}
+          {user.ghana_card_number && (
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <span>🪪</span>
+              <span style={{ fontFamily: 'monospace', fontSize: '12px', background: '#f1f5f9', padding: '1px 6px', borderRadius: '4px' }}>
+                {user.ghana_card_number}
+              </span>
+            </div>
+          )}
+          {user.date_of_birth && (
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <span>🎂</span>
+              <span>{new Date(user.date_of_birth).toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' })}</span>
+            </div>
+          )}
+          {user.start_date && (
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <span>📅</span>
+              <span>Joined {new Date(user.start_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' })}</span>
+            </div>
+          )}
+          {user.emergency_name && (
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <span>🚨</span>
+              <span>{user.emergency_name} ({user.emergency_relation}) · {user.emergency_phone}</span>
+            </div>
+          )}
+          {user.last_login && (
+            <div style={{ display: 'flex', gap: '8px', color: 'var(--text-3)', fontSize: '12px' }}>
+              <span>🕐</span>
+              <span>Last login {new Date(user.last_login).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })}</span>
+            </div>
+          )}
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+          <button className="btn btn-secondary btn-sm" onClick={() => onEdit(user)}>✏️ Edit</button>
+          {!isSelf && isSuperAdmin && (
+            <button
+              className={`btn btn-sm ${user.is_active ? 'btn-warning' : 'btn-success'}`}
+              onClick={() => onToggle(user)}
+            >
+              {user.is_active ? 'Deactivate' : 'Activate'}
+            </button>
+          )}
+          {!isSelf && isSuperAdmin && (
+            <button className="btn btn-danger btn-sm" onClick={() => onDelete(user)}>🗑 Delete</button>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════════════════
+   MAIN COMPONENT
+═══════════════════════════════════════════════════════════════ */
+const Staff = () => {
+  const { user: currentUser } = useAuth();
+  const isSuperAdmin = currentUser?.role === 'super_admin';
+
+  const [users,      setUsers]      = useState([]);
+  const [loading,    setLoading]    = useState(true);
+  const [total,      setTotal]      = useState(0);
+  const [page,       setPage]       = useState(1);
+  const [pages,      setPages]      = useState(1);
+  const [search,     setSearch]     = useState('');
+  const [filterRole, setFilterRole] = useState('');
+  const [viewMode,   setViewMode]   = useState('cards'); // 'cards' | 'table'
+
+  /* Modal */
+  const [showModal,   setShowModal]   = useState(false);
+  const [editing,     setEditing]     = useState(null);
+  const [saving,      setSaving]      = useState(false);
+  const [form,        setForm]        = useState(EMPTY_FORM);
+  const [activeSection, setActiveSection] = useState('account');
+  const photoInputRef = useRef();
+
+  /* ── Fetch ─────────────────────────────────────────────────── */
   const fetchUsers = useCallback(async () => {
     try {
       setLoading(true);
       const params = { page, limit: 20 };
-      if (search) params.search = search;
-      if (filterRole) params.role = filterRole;
+      if (search)     params.search = search;
+      if (filterRole) params.role   = filterRole;
       const res = await usersAPI.getAll(params);
       setUsers(res.data.users || []);
       setTotal(res.data.total || 0);
@@ -44,27 +191,68 @@ const Staff = () => {
   }, [page, search, filterRole]);
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
-  useEffect(() => { setPage(1); }, [search, filterRole]);
+  useEffect(() => { setPage(1); },  [search, filterRole]);
 
+  /* ── Open add / edit ────────────────────────────────────────── */
   const openAdd = () => {
     setEditing(null);
-    setForm({ name: '', email: '', password: '', role: 'cashier', phone: '' });
+    setForm(EMPTY_FORM);
+    setActiveSection('account');
     setShowModal(true);
   };
 
   const openEdit = (user) => {
     setEditing(user);
-    setForm({ name: user.name || '', email: user.email || '', password: '', role: user.role || 'cashier', phone: user.phone || '' });
+    setForm({
+      name:               user.name               || '',
+      email:              user.email              || '',
+      password:           '',
+      role:               user.role               || 'cashier',
+      phone:              user.phone              || '',
+      date_of_birth:      user.date_of_birth      ? user.date_of_birth.split('T')[0] : '',
+      gender:             user.gender             || '',
+      address:            user.address            || '',
+      ghana_card_number:  user.ghana_card_number  || '',
+      start_date:         user.start_date         ? user.start_date.split('T')[0] : '',
+      emergency_name:     user.emergency_name     || '',
+      emergency_phone:    user.emergency_phone    || '',
+      emergency_relation: user.emergency_relation || '',
+      passport_photo:     user.passport_photo     || '',
+      notes:              user.notes              || '',
+    });
+    setActiveSection('account');
     setShowModal(true);
   };
 
+  /* ── Handle passport photo upload ───────────────────────────── */
+  const handlePhotoUpload = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    if (file.size > 2 * 1024 * 1024) {
+      alert('Photo must be under 2MB');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onloadend = () => setForm(f => ({ ...f, passport_photo: reader.result }));
+    reader.readAsDataURL(file);
+  };
+
+  /* ── Save ────────────────────────────────────────────────────── */
   const handleSave = async () => {
     if (!form.name || !form.email) return alert('Name and email are required');
     if (!editing && !form.password) return alert('Password is required for new staff');
+    if (!editing && form.password.length < 8) return alert('Password must be at least 8 characters');
+
+    // Non-super-admins cannot assign super_admin role
+    if (form.role === 'super_admin' && !isSuperAdmin) {
+      return alert('Only Super Admin can assign the Super Admin role');
+    }
+
     try {
       setSaving(true);
       if (editing) {
-        const data = { name: form.name, email: form.email, role: form.role, phone: form.phone };
+        const data = { ...form };
+        delete data.password; // don't send empty password on edit
         await usersAPI.update(editing.id, data);
       } else {
         await usersAPI.create(form);
@@ -78,8 +266,9 @@ const Staff = () => {
     }
   };
 
+  /* ── Toggle ──────────────────────────────────────────────────── */
   const handleToggle = async (user) => {
-    const action = user.is_active ? 'deactivate' : 'activate';
+    const action = user.is_active ? 'Deactivate' : 'Activate';
     if (!window.confirm(`${action} ${user.name}?`)) return;
     try {
       await usersAPI.toggle(user.id);
@@ -89,24 +278,72 @@ const Staff = () => {
     }
   };
 
+  /* ── Delete (super_admin only) ───────────────────────────────── */
+  const handleDelete = async (user) => {
+    if (!window.confirm(`Permanently delete ${user.name}? This cannot be undone.`)) return;
+    try {
+      await usersAPI.delete(user.id);
+      fetchUsers();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error deleting staff member');
+    }
+  };
+
+  /* ── Form sections ───────────────────────────────────────────── */
+  const sections = [
+    { key: 'account',   label: '👤 Account' },
+    { key: 'personal',  label: '📋 Personal' },
+    { key: 'emergency', label: '🚨 Emergency' },
+    { key: 'photo',     label: '📸 Photo & Notes' },
+  ];
+
+  const f = (field) => ({
+    className: 'form-input',
+    value: form[field],
+    onChange: e => setForm(p => ({ ...p, [field]: e.target.value })),
+  });
+
+  /* ── Role options — hide super_admin from non-super-admins ───── */
+  const availableRoles = isSuperAdmin ? ROLES : ROLES.filter(r => r !== 'super_admin');
+
+  /* ══════════════════════════════════════════════════════════════
+     RENDER
+  ══════════════════════════════════════════════════════════════ */
   return (
     <div>
+      {/* Page header */}
       <div className="page-header">
         <div>
           <h1 className="page-title">Staff</h1>
-          <p style={{ color: '#888', fontSize: '13px', margin: '4px 0 0' }}>{total} staff members</p>
+          <p className="page-subtitle">{total} staff members</p>
         </div>
-        <button className="btn btn-primary" onClick={openAdd}>+ Add Staff</button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          {/* View toggle */}
+          <div style={{ display: 'flex', gap: '4px', background: '#f1f5f9', borderRadius: '8px', padding: '4px' }}>
+            <button
+              className={`btn btn-sm ${viewMode === 'cards' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ padding: '4px 10px' }}
+              onClick={() => setViewMode('cards')}
+            >⊞ Cards</button>
+            <button
+              className={`btn btn-sm ${viewMode === 'table' ? 'btn-primary' : 'btn-secondary'}`}
+              style={{ padding: '4px 10px' }}
+              onClick={() => setViewMode('table')}
+            >☰ Table</button>
+          </div>
+          <button className="btn btn-primary" onClick={openAdd}>+ Add Staff</button>
+        </div>
       </div>
 
-      {/* Search + filter */}
+      {/* Filters */}
       <div className="card" style={{ marginBottom: '16px' }}>
         <div className="search-bar">
           <input
-            className="search-input"
-            placeholder="🔍 Search by name, email or phone..."
+            className="form-input"
+            placeholder="🔍 Search by name, email or phone…"
             value={search}
             onChange={e => setSearch(e.target.value)}
+            style={{ flex: 1 }}
           />
           <select
             className="form-input"
@@ -120,151 +357,345 @@ const Staff = () => {
             ))}
           </select>
           {(search || filterRole) && (
-            <button className="btn btn-secondary" onClick={() => { setSearch(''); setFilterRole(''); }}>Clear</button>
+            <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(''); setFilterRole(''); }}>
+              Clear
+            </button>
           )}
+          <span className="pagination-info">{total} result{total !== 1 ? 's' : ''}</span>
         </div>
       </div>
 
-      {/* Table */}
-      <div className="card">
-        {loading ? (
-          <div className="loading">Loading staff...</div>
-        ) : users.length === 0 ? (
-          <div className="empty-state">
-            <div style={{ fontSize: '40px', marginBottom: '12px' }}>👤</div>
-            <h3>No staff members yet</h3>
-            <p>Add your first staff member to get started</p>
+      {/* Content */}
+      {loading ? (
+        <div className="loading">
+          <div className="loading-spinner" />
+          <span className="loading-text">Loading staff…</span>
+        </div>
+      ) : users.length === 0 ? (
+        <div className="empty-state">
+          <div className="empty-icon">👤</div>
+          <h3>No staff members found</h3>
+          <p>{search || filterRole ? 'No staff match your filters.' : 'Add your first staff member to get started.'}</p>
+          {!search && !filterRole && (
             <button className="btn btn-primary" style={{ marginTop: '16px' }} onClick={openAdd}>+ Add Staff</button>
-          </div>
-        ) : (
-          <>
-            <div className="table-wrapper">
-              <table>
-                <thead>
-                  <tr>
-                    <th>Name</th>
-                    <th>Email</th>
-                    <th>Phone</th>
-                    <th>Role</th>
-                    <th>Status</th>
-                    <th>Last Login</th>
-                    <th>Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {users.map(user => (
-                    <tr key={user.id}>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                          <div style={{
-                            width: '32px', height: '32px', borderRadius: '50%',
-                            background: ROLE_COLORS[user.role]?.text || '#666',
-                            display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            color: 'white', fontWeight: 'bold', fontSize: '13px', flexShrink: 0,
-                          }}>
-                            {user.name?.charAt(0).toUpperCase()}
-                          </div>
-                          <span style={{ fontWeight: '600' }}>{user.name}</span>
-                        </div>
-                      </td>
-                      <td style={{ color: '#666', fontSize: '13px' }}>{user.email}</td>
-                      <td style={{ color: '#666', fontSize: '13px' }}>{user.phone || '—'}</td>
-                      <td>
-                        <span style={{
-                          background: ROLE_COLORS[user.role]?.bg || '#eee',
-                          color: ROLE_COLORS[user.role]?.text || '#333',
-                          padding: '3px 10px', borderRadius: '20px',
-                          fontSize: '11px', fontWeight: '600', textTransform: 'capitalize', whiteSpace: 'nowrap',
-                        }}>
-                          {user.role?.replace('_', ' ')}
-                        </span>
-                      </td>
-                      <td>
-                        <span style={{
-                          background: user.is_active ? '#d4edda' : '#f8d7da',
-                          color: user.is_active ? '#155724' : '#721c24',
-                          padding: '3px 10px', borderRadius: '20px',
-                          fontSize: '11px', fontWeight: '600',
-                        }}>
-                          {user.is_active ? 'Active' : 'Inactive'}
-                        </span>
-                      </td>
-                      <td style={{ color: '#888', fontSize: '12px', whiteSpace: 'nowrap' }}>
-                        {user.last_login
-                          ? new Date(user.last_login).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' })
-                          : 'Never'}
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <button className="btn btn-secondary" style={{ padding: '4px 10px', fontSize: '12px' }} onClick={() => openEdit(user)}>Edit</button>
-                          <button
-                            className={user.is_active ? 'btn btn-danger' : 'btn btn-success'}
-                            style={{ padding: '4px 10px', fontSize: '12px' }}
-                            onClick={() => handleToggle(user)}
-                          >
-                            {user.is_active ? 'Deactivate' : 'Activate'}
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+          )}
+        </div>
+      ) : (
+        <>
+          {/* Card grid view */}
+          {viewMode === 'cards' && (
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(300px, 1fr))', gap: '16px' }}>
+              {users.map(user => (
+                <ProfileCard
+                  key={user.id}
+                  user={user}
+                  currentUser={currentUser}
+                  onEdit={openEdit}
+                  onDelete={handleDelete}
+                  onToggle={handleToggle}
+                />
+              ))}
             </div>
+          )}
 
-            {pages > 1 && (
-              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginTop: '20px' }}>
-                <button className="btn btn-secondary" disabled={page === 1} onClick={() => setPage(p => p - 1)}>← Prev</button>
-                <span style={{ fontSize: '13px', color: '#666' }}>Page {page} of {pages}</span>
-                <button className="btn btn-secondary" disabled={page === pages} onClick={() => setPage(p => p + 1)}>Next →</button>
+          {/* Table view */}
+          {viewMode === 'table' && (
+            <div className="card">
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Name</th>
+                      <th>Role</th>
+                      <th>Phone</th>
+                      <th>Ghana Card</th>
+                      <th>Start Date</th>
+                      <th>Status</th>
+                      <th>Last Login</th>
+                      <th>Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {users.map(user => {
+                      const isSelf = user.id === currentUser?.id;
+                      return (
+                        <tr key={user.id}>
+                          <td>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                              {user.passport_photo ? (
+                                <img src={user.passport_photo} alt={user.name}
+                                  style={{ width: '32px', height: '32px', borderRadius: '50%', objectFit: 'cover' }} />
+                              ) : (
+                                <div style={{
+                                  width: '32px', height: '32px', borderRadius: '50%',
+                                  background: ROLE_AVATAR[user.role] || '#64748b',
+                                  display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                  color: '#fff', fontWeight: '800', fontSize: '12px', flexShrink: 0,
+                                }}>
+                                  {user.name?.charAt(0).toUpperCase()}
+                                </div>
+                              )}
+                              <div>
+                                <div style={{ fontWeight: '600' }}>{user.name} {isSelf && <span className="badge badge-navy" style={{ fontSize: '9px' }}>You</span>}</div>
+                                <div style={{ fontSize: '11px', color: 'var(--text-3)' }}>{user.email}</div>
+                              </div>
+                            </div>
+                          </td>
+                          <td><span className={ROLE_BADGE[user.role] || 'badge badge-gray'}>{user.role?.replace('_', ' ')}</span></td>
+                          <td style={{ color: 'var(--text-2)', fontSize: '13px' }}>{user.phone || '—'}</td>
+                          <td style={{ fontFamily: 'monospace', fontSize: '12px', color: 'var(--text-2)' }}>{user.ghana_card_number || '—'}</td>
+                          <td style={{ color: 'var(--text-3)', fontSize: '12px' }}>
+                            {user.start_date ? new Date(user.start_date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+                          </td>
+                          <td><span className={`badge ${user.is_active ? 'badge-green' : 'badge-red'}`}>{user.is_active ? 'Active' : 'Inactive'}</span></td>
+                          <td style={{ color: 'var(--text-3)', fontSize: '12px', whiteSpace: 'nowrap' }}>
+                            {user.last_login ? new Date(user.last_login).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : 'Never'}
+                          </td>
+                          <td>
+                            <div style={{ display: 'flex', gap: '5px' }}>
+                              <button className="btn btn-secondary btn-sm" onClick={() => openEdit(user)}>Edit</button>
+                              {!isSelf && isSuperAdmin && (
+                                <>
+                                  <button
+                                    className={`btn btn-sm ${user.is_active ? 'btn-warning' : 'btn-success'}`}
+                                    onClick={() => handleToggle(user)}
+                                  >
+                                    {user.is_active ? 'Deactivate' : 'Activate'}
+                                  </button>
+                                  <button className="btn btn-danger btn-sm" onClick={() => handleDelete(user)}>Delete</button>
+                                </>
+                              )}
+                            </div>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
-            )}
-          </>
-        )}
-      </div>
+            </div>
+          )}
 
-      {/* Modal */}
+          {/* Pagination */}
+          {pages > 1 && (
+            <div className="pagination" style={{ marginTop: '16px' }}>
+              <span className="pagination-info">Page {page} of {pages} · {total} staff</span>
+              <button className="btn btn-secondary btn-sm" disabled={page === 1} onClick={() => setPage(p => p - 1)}>← Prev</button>
+              <button className="btn btn-secondary btn-sm" disabled={page === pages} onClick={() => setPage(p => p + 1)}>Next →</button>
+            </div>
+          )}
+        </>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════
+          Staff Profile Modal
+      ══════════════════════════════════════════════════════════ */}
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+          <div
+            className="modal"
+            style={{ maxWidth: '600px', maxHeight: '90vh', overflowY: 'auto' }}
+            onClick={e => e.stopPropagation()}
+          >
             <div className="modal-header">
-              <h2 className="modal-title">{editing ? 'Edit Staff Member' : 'Add Staff Member'}</h2>
-              <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', fontSize: '20px', cursor: 'pointer' }}>✕</button>
+              <h2 className="modal-title">
+                {editing ? `Edit — ${editing.name}` : 'Add Staff Member'}
+              </h2>
+              <button className="modal-close" onClick={() => setShowModal(false)}>✕</button>
             </div>
 
-            <div className="form-group">
-              <label className="form-label">Full Name *</label>
-              <input className="form-input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. Ama Owusu" />
+            {/* Section tabs */}
+            <div className="tabs" style={{ marginBottom: '20px' }}>
+              {sections.map(s => (
+                <button
+                  key={s.key}
+                  className={`tab-btn${activeSection === s.key ? ' active' : ''}`}
+                  onClick={() => setActiveSection(s.key)}
+                >
+                  {s.label}
+                </button>
+              ))}
             </div>
-            <div className="form-group">
-              <label className="form-label">Email *</label>
-              <input className="form-input" type="email" value={form.email} onChange={e => setForm(f => ({ ...f, email: e.target.value }))} placeholder="e.g. ama@procyclone.com" />
-            </div>
-            {!editing && (
-              <div className="form-group">
-                <label className="form-label">Password *</label>
-                <input className="form-input" type="password" value={form.password} onChange={e => setForm(f => ({ ...f, password: e.target.value }))} placeholder="Min 8 characters, 1 number" />
+
+            {/* ── Section: Account ───────────────────────────── */}
+            {activeSection === 'account' && (
+              <div>
+                <div className="form-group">
+                  <label className="form-label">Full Name *</label>
+                  <input {...f('name')} placeholder="e.g. Ama Owusu" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Email Address *</label>
+                  <input {...f('email')} type="email" placeholder="e.g. ama@shorewinds.com" />
+                </div>
+                {!editing && (
+                  <div className="form-group">
+                    <label className="form-label">Password *</label>
+                    <input {...f('password')} type="password" placeholder="Min 8 characters, 1 number" />
+                  </div>
+                )}
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Role *</label>
+                    <select {...f('role')}>
+                      {availableRoles.map(r => (
+                        <option key={r} value={r}>{r.replace('_', ' ')}</option>
+                      ))}
+                    </select>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Phone</label>
+                    <input {...f('phone')} placeholder="e.g. 0244123456" />
+                  </div>
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Start Date</label>
+                    <input {...f('start_date')} type="date" />
+                  </div>
+                </div>
               </div>
             )}
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-              <div className="form-group">
-                <label className="form-label">Role *</label>
-                <select className="form-input" value={form.role} onChange={e => setForm(f => ({ ...f, role: e.target.value }))}>
-                  {ROLES.map(r => (
-                    <option key={r} value={r}>{r.replace('_', ' ')}</option>
-                  ))}
-                </select>
-              </div>
-              <div className="form-group">
-                <label className="form-label">Phone</label>
-                <input className="form-input" value={form.phone} onChange={e => setForm(f => ({ ...f, phone: e.target.value }))} placeholder="e.g. 0244123456" />
-              </div>
-            </div>
 
-            <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowModal(false)}>Cancel</button>
+            {/* ── Section: Personal ──────────────────────────── */}
+            {activeSection === 'personal' && (
+              <div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Date of Birth</label>
+                    <input {...f('date_of_birth')} type="date" />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Gender</label>
+                    <select {...f('gender')}>
+                      <option value="">Select…</option>
+                      <option value="Male">Male</option>
+                      <option value="Female">Female</option>
+                      <option value="Other">Other</option>
+                      <option value="Prefer not to say">Prefer not to say</option>
+                    </select>
+                  </div>
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Home Address</label>
+                  <textarea {...f('address')} rows={2} placeholder="e.g. Madina, Accra" />
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Ghana Card Number</label>
+                  <input {...f('ghana_card_number')} placeholder="e.g. GHA-000000000-0" style={{ fontFamily: 'monospace' }} />
+                  <p style={{ fontSize: '12px', color: 'var(--text-3)', margin: '4px 0 0' }}>
+                    Format: GHA-XXXXXXXXX-X
+                  </p>
+                </div>
+              </div>
+            )}
+
+            {/* ── Section: Emergency Contact ─────────────────── */}
+            {activeSection === 'emergency' && (
+              <div>
+                <div className="alert alert-info" style={{ marginBottom: '16px' }}>
+                  This contact will be reached in case of an emergency involving this staff member.
+                </div>
+                <div className="form-group">
+                  <label className="form-label">Contact Name</label>
+                  <input {...f('emergency_name')} placeholder="e.g. Kofi Mensah" />
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="form-group">
+                    <label className="form-label">Contact Phone</label>
+                    <input {...f('emergency_phone')} placeholder="e.g. 0201234567" />
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Relationship</label>
+                    <select {...f('emergency_relation')}>
+                      <option value="">Select…</option>
+                      <option value="Spouse">Spouse</option>
+                      <option value="Parent">Parent</option>
+                      <option value="Sibling">Sibling</option>
+                      <option value="Child">Child</option>
+                      <option value="Friend">Friend</option>
+                      <option value="Other">Other</option>
+                    </select>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* ── Section: Photo & Notes ─────────────────────── */}
+            {activeSection === 'photo' && (
+              <div>
+                <div className="form-group">
+                  <label className="form-label">Passport Photo</label>
+
+                  {/* Preview */}
+                  {form.passport_photo && (
+                    <div style={{ marginBottom: '12px', textAlign: 'center' }}>
+                      <img
+                        src={form.passport_photo}
+                        alt="Passport"
+                        style={{
+                          width: '120px', height: '150px', objectFit: 'cover',
+                          borderRadius: '8px', border: '2px solid var(--border)',
+                        }}
+                      />
+                    </div>
+                  )}
+
+                  {/* Upload area */}
+                  <div
+                    onClick={() => photoInputRef.current?.click()}
+                    style={{
+                      border: '2px dashed var(--border)', borderRadius: '10px',
+                      padding: '24px', textAlign: 'center', cursor: 'pointer',
+                      background: '#f8fafc', transition: 'border-color .2s',
+                    }}
+                    onMouseEnter={e => e.currentTarget.style.borderColor = 'var(--accent)'}
+                    onMouseLeave={e => e.currentTarget.style.borderColor = 'var(--border)'}
+                  >
+                    <div style={{ fontSize: '32px', marginBottom: '8px' }}>📸</div>
+                    <p style={{ fontWeight: '600', margin: '0 0 4px', fontSize: '14px' }}>
+                      {form.passport_photo ? 'Click to change photo' : 'Click to upload passport photo'}
+                    </p>
+                    <p style={{ color: 'var(--text-3)', fontSize: '12px', margin: 0 }}>
+                      JPG or PNG · Max 2MB · Passport size recommended
+                    </p>
+                  </div>
+                  <input
+                    ref={photoInputRef}
+                    type="file"
+                    accept="image/jpeg,image/png"
+                    style={{ display: 'none' }}
+                    onChange={handlePhotoUpload}
+                  />
+                  {form.passport_photo && (
+                    <button
+                      className="btn btn-danger btn-sm"
+                      style={{ marginTop: '8px' }}
+                      onClick={() => setForm(f => ({ ...f, passport_photo: '' }))}
+                    >
+                      Remove photo
+                    </button>
+                  )}
+                </div>
+
+                <div className="form-group">
+                  <label className="form-label">Notes</label>
+                  <textarea
+                    {...f('notes')}
+                    rows={3}
+                    placeholder="Any additional notes about this staff member…"
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Footer actions */}
+            <div style={{ display: 'flex', gap: '8px', marginTop: '24px', paddingTop: '16px', borderTop: '1px solid var(--border)' }}>
+              <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowModal(false)}>
+                Cancel
+              </button>
               <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleSave} disabled={saving}>
-                {saving ? 'Saving...' : editing ? 'Save Changes' : 'Add Staff'}
+                {saving ? 'Saving…' : editing ? 'Save Changes' : 'Add Staff Member'}
               </button>
             </div>
           </div>

@@ -8,7 +8,7 @@ const createOrderValidation = [
   body('items.*.product_id').isInt({ min: 1 }).withMessage('Valid product ID is required'),
   body('items.*.quantity').isInt({ min: 1 }).withMessage('Quantity must be at least 1'),
   body('items.*.unit_price').isFloat({ min: 0 }).withMessage('Unit price must be a positive number'),
-  body('payment_method').isIn(['cash', 'momo']).withMessage('Payment method must be cash or momo'),
+  body('payment_method').isIn(['cash', 'momo', 'cod']).withMessage('Payment method must be cash, momo, or cod'),
   body('delivery_address').notEmpty().withMessage('Delivery address is required'),
 ];
 
@@ -85,7 +85,7 @@ const createOrder = async (req, res) => {
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    const { customer_id, items, payment_method, delivery_address, notes } = req.body;
+    const { customer_id, items, payment_method, delivery_address, notes, momo_reference } = req.body;
 
     for (const item of items) {
       const product = await client.query(
@@ -126,11 +126,11 @@ const createOrder = async (req, res) => {
         [item.quantity, item.product_id]
       );
     }
-// Auto-create payment record
+// Auto-create payment record — store MoMo reference if provided
    await client.query(
-     `INSERT INTO payments (order_id, method, amount)
-      VALUES ($1, $2, $3)`,
-    [orderId, payment_method, total]
+     `INSERT INTO payments (order_id, method, amount, reference)
+      VALUES ($1, $2, $3, $4)`,
+    [orderId, payment_method, total, momo_reference || null]
 );
     await client.query('COMMIT');
     res.status(201).json({ success: true, message: 'Order created', order: order.rows[0] });

@@ -9,7 +9,7 @@ const createProductValidation = [
 
 const getProducts = async (req, res) => {
   try {
-    const { search, category, page = 1, limit = 20 } = req.query;
+    const { search, category, low_stock, page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
     const conditions = ['is_active = true'];
     const values = [];
@@ -20,6 +20,7 @@ const getProducts = async (req, res) => {
       values.push(`%${search}%`); i++;
     }
     if (category) { conditions.push(`category = $${i++}`); values.push(category); }
+    if (low_stock === 'true') { conditions.push(`stock_quantity <= low_stock_threshold`); }
 
     const where = `WHERE ${conditions.join(' AND ')}`;
 
@@ -55,6 +56,7 @@ const getPublicProducts = async (req, res) => {
       values.push(`%${search}%`); i++;
     }
     if (category) { conditions.push(`category = $${i++}`); values.push(category); }
+    if (low_stock === 'true') { conditions.push(`stock_quantity <= low_stock_threshold`); }
     if (is_deal === 'true') { conditions.push(`is_deal = true`); }
 
     const where = `WHERE ${conditions.join(' AND ')}`;

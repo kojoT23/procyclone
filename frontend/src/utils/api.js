@@ -52,6 +52,7 @@ export const usersAPI = {
   create: (data) => API.post('/users', data),
   update: (id, data) => API.put(`/users/${id}`, data),
   toggle: (id) => API.patch(`/users/${id}/toggle`),
+  delete: (id) => API.delete(`/users/${id}`),
   getRoles: () => API.get('/users/roles'),
 };
 
@@ -62,7 +63,7 @@ export const productsAPI = {
   update: (id, data) => API.put(`/products/${id}`, data),
   delete: (id) => API.delete(`/products/${id}`),
   updateStock: (id, data) => API.patch(`/products/${id}/stock`, data),
-  bulkImport: (data) => API.post("/products/bulk-import", data),
+  bulkImport: (data) => API.post('/products/bulk-import', data),
 };
 
 export const customersAPI = {
@@ -78,8 +79,6 @@ export const ordersAPI = {
   getOne: (id) => API.get(`/orders/${id}`),
   create: (data) => API.post('/orders', data),
   updateStatus: (id, data) => API.put(`/orders/${id}/status`, data),
-  delete: (id) => API.delete(`/orders/${id}`),
-  delete: (id) => API.delete(`/orders/${id}`),
   delete: (id) => API.delete(`/orders/${id}`),
 };
 
@@ -97,8 +96,8 @@ export const cashAPI = {
   getAll: (params) => API.get('/cash', { params }),
   create: (data) => API.post('/cash', data),
   verify: (id) => API.put(`/cash/${id}/verify`),
-  getDailyReport: () => API.get('/cash/report/daily'),
   dispute: (id, data) => API.put(`/cash/${id}/dispute`, data),
+  getDailyReport: (params) => API.get('/cash/report/daily', { params }), // ← now accepts { date }
   getReconciliation: (params) => API.get('/cash/reconciliation', { params }),
 };
 

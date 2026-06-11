@@ -2,7 +2,19 @@ const pool = require('../config/db');
 
 const getRevenueReport = async (req, res) => {
   try {
-    const { period = '30' } = req.query;
+    const { period = '30', start_date, end_date } = req.query;
+
+    // Build WHERE clause — support both period and custom date range
+    let whereClause;
+    let queryParams = [];
+    if (start_date && end_date) {
+      whereClause = `WHERE DATE(created_at) >= $1 AND DATE(created_at) <= $2`;
+      queryParams = [start_date, end_date];
+    } else {
+      whereClause = `WHERE created_at >= NOW() - INTERVAL '${parseInt(period)} days'`;
+    }
+
+    const ph = queryParams.length; // number of existing params
 
     // Daily revenue for the period
     const dailyRevenue = await pool.query(
@@ -13,9 +25,10 @@ const getRevenueReport = async (req, res) => {
         COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
         SUM(CASE WHEN status = 'delivered' THEN total_amount ELSE 0 END) as revenue
        FROM orders
-       WHERE created_at >= NOW() - INTERVAL '${parseInt(period)} days'
+       ${whereClause}
        GROUP BY DATE(created_at)
-       ORDER BY date DESC`
+       ORDER BY date DESC`,
+      queryParams
     );
 
     // Overall summary
@@ -29,7 +42,8 @@ const getRevenueReport = async (req, res) => {
         SUM(CASE WHEN status = 'delivered' THEN total_amount ELSE 0 END) as total_revenue,
         AVG(CASE WHEN status = 'delivered' THEN total_amount END) as avg_order_value
        FROM orders
-       WHERE created_at >= NOW() - INTERVAL '${parseInt(period)} days'`
+       ${whereClause}`,
+      queryParams
     );
 
     // Payment method breakdown
@@ -39,13 +53,16 @@ const getRevenueReport = async (req, res) => {
         COUNT(*) as count,
         SUM(total_amount) as total
        FROM orders
-       WHERE created_at >= NOW() - INTERVAL '${parseInt(period)} days'
-       GROUP BY payment_method`
+       ${whereClause}
+       GROUP BY payment_method`,
+      queryParams
     );
 
     res.json({
       success: true,
-      period: parseInt(period),
+      period: start_date && end_date ? 'custom' : parseInt(period),
+      start_date: start_date || null,
+      end_date: end_date || null,
       summary: summary.rows[0],
       daily: dailyRevenue.rows,
       payment_breakdown: paymentBreakdown.rows,
@@ -58,7 +75,16 @@ const getRevenueReport = async (req, res) => {
 
 const getProductReport = async (req, res) => {
   try {
-    const { period = '30' } = req.query;
+    const { period = '30', start_date, end_date } = req.query;
+
+    let dateFilter;
+    let queryParams = [];
+    if (start_date && end_date) {
+      dateFilter = `AND DATE(o.created_at) >= $1 AND DATE(o.created_at) <= $2`;
+      queryParams = [start_date, end_date];
+    } else {
+      dateFilter = `AND o.created_at >= NOW() - INTERVAL '${parseInt(period)} days'`;
+    }
 
     // Top selling products
     const topProducts = await pool.query(
@@ -71,10 +97,11 @@ const getProductReport = async (req, res) => {
        JOIN products p ON oi.product_id = p.id
        JOIN orders o ON oi.order_id = o.id
        WHERE o.status = 'delivered'
-       AND o.created_at >= NOW() - INTERVAL '${parseInt(period)} days'
+       ${dateFilter}
        GROUP BY p.id, p.name, p.category, p.price, p.stock_quantity
        ORDER BY total_sold DESC
-       LIMIT 10`
+       LIMIT 10`,
+      queryParams
     );
 
     // Low stock products
@@ -108,7 +135,17 @@ const getProductReport = async (req, res) => {
 
 const getRiderReport = async (req, res) => {
   try {
-    const { period = '30' } = req.query;
+    const { period = '30', start_date, end_date } = req.query;
+
+    let deliveryFilter, cashFilter, queryParams = [];
+    if (start_date && end_date) {
+      deliveryFilter = `AND DATE(d.created_at) >= $1 AND DATE(d.created_at) <= $2`;
+      cashFilter     = `AND DATE(cl.created_at) >= $1 AND DATE(cl.created_at) <= $2`;
+      queryParams    = [start_date, end_date];
+    } else {
+      deliveryFilter = `AND d.created_at >= NOW() - INTERVAL '${parseInt(period)} days'`;
+      cashFilter     = `AND cl.created_at >= NOW() - INTERVAL '${parseInt(period)} days'`;
+    }
 
     const riderPerformance = await pool.query(
       `SELECT
@@ -122,11 +159,12 @@ const getRiderReport = async (req, res) => {
         COUNT(CASE WHEN cl.status = 'disputed' THEN 1 END) as disputed_collections
        FROM riders r
        LEFT JOIN deliveries d ON r.id = d.rider_id
-         AND d.created_at >= NOW() - INTERVAL '${parseInt(period)} days'
+         ${deliveryFilter}
        LEFT JOIN cash_logs cl ON r.id = cl.rider_id
-         AND cl.created_at >= NOW() - INTERVAL '${parseInt(period)} days'
+         ${cashFilter}
        GROUP BY r.id, r.name, r.phone
-       ORDER BY total_deliveries DESC`
+       ORDER BY total_deliveries DESC`,
+      queryParams
     );
 
     res.json({

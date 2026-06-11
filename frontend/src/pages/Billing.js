@@ -229,9 +229,10 @@ const Billing = () => {
           quantity: parseInt(item.quantity),
           unit_price: parseFloat(item.unit_price),
         })),
-        payment_method: paymentMethod === 'paid_on_delivery' ? 'cash' : paymentMethod,
+        payment_method: paymentMethod === 'paid_on_delivery' ? 'cod' : paymentMethod,
         delivery_address: deliveryAddress,
-        notes: (notes ? notes + ' | ' : '') + (paymentMethod === 'momo' && momoReference ? 'MoMo Ref: ' + momoReference : '') + (paymentMethod === 'paid_on_delivery' ? 'Paid on delivery' : ''),
+        notes: notes || '',
+        ...(paymentMethod === 'momo' && momoReference ? { momo_reference: momoReference } : {}),
       };
 
       const orderRes = await ordersAPI.create(orderPayload);

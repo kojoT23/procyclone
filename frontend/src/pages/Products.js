@@ -15,8 +15,9 @@ const Products = () => {
   const [importResult, setImportResult] = useState(null);
   const fileInputRef = useRef();
   const [form, setForm] = useState({
-    name: '', description: '', price: '', stock_quantity: '',
-    low_stock_threshold: '5', category: '', image_url: '',
+    name: '', description: '', price: '', compare_price: '',
+    stock_quantity: '', low_stock_threshold: '5', category: '',
+    image_url: '', is_deal: false, badge: '', rating: '', review_count: '',
   });
 
   const fetchProducts = useCallback(async () => {
@@ -40,7 +41,11 @@ const Products = () => {
 
   const openAdd = () => {
     setEditing(null);
-    setForm({ name: '', description: '', price: '', stock_quantity: '', low_stock_threshold: '5', category: '', image_url: '' });
+    setForm({
+      name: '', description: '', price: '', compare_price: '',
+      stock_quantity: '', low_stock_threshold: '5', category: '',
+      image_url: '', is_deal: false, badge: '', rating: '', review_count: '',
+    });
     setShowModal(true);
   };
 
@@ -50,10 +55,15 @@ const Products = () => {
       name: product.name || '',
       description: product.description || '',
       price: product.price || '',
+      compare_price: product.compare_price || '',
       stock_quantity: product.stock_quantity || '',
       low_stock_threshold: product.low_stock_threshold || '5',
       category: product.category || '',
       image_url: product.image_url || '',
+      is_deal: product.is_deal || false,
+      badge: product.badge || '',
+      rating: product.rating || '',
+      review_count: product.review_count || '',
     });
     setShowModal(true);
   };
@@ -89,7 +99,6 @@ const Products = () => {
   const handleCSVImport = (e) => {
     const file = e.target.files[0];
     if (!file) return;
-
     const reader = new FileReader();
     reader.onload = async (event) => {
       try {
@@ -98,23 +107,15 @@ const Products = () => {
         const text = event.target.result;
         const lines = text.split('\n').filter(l => l.trim());
         const headers = lines[0].toLowerCase().split(',').map(h => h.trim().replace(/"/g, ''));
-
         const products = [];
         for (let i = 1; i < lines.length; i++) {
           const values = lines[i].split(',').map(v => v.trim().replace(/"/g, ''));
           if (values.length < 2) continue;
           const product = {};
-          headers.forEach((header, index) => {
-            product[header] = values[index] || '';
-          });
+          headers.forEach((header, index) => { product[header] = values[index] || ''; });
           if (product.name) products.push(product);
         }
-
-        if (products.length === 0) {
-          alert('No valid products found in CSV');
-          return;
-        }
-
+        if (products.length === 0) { alert('No valid products found in CSV'); return; }
         const res = await productsAPI.bulkImport({ products });
         setImportResult(res.data);
         fetchProducts();
@@ -129,22 +130,21 @@ const Products = () => {
   };
 
   const downloadTemplate = () => {
-    const csv = `name,description,price,stock_quantity,low_stock_threshold,category
-Mountain Bike Helmet,Premium safety helmet,150.00,20,5,Helmets
-Road Bike Gloves,Padded cycling gloves,45.00,50,10,Accessories
-Water Bottle,750ml cycling bottle,25.00,100,20,Accessories`;
+    const csv = `name,description,price,compare_price,stock_quantity,low_stock_threshold,category,badge,is_deal,rating,review_count
+iPhone 16 Pro,Latest Apple smartphone,2500.00,3000.00,10,3,Electronics,Best Seller,true,4.8,128
+Nike Air Force 1,Classic white sneakers,850.00,1200.00,5,2,Footwear,Hot Deal,true,4.5,64`;
     const blob = new Blob([csv], { type: 'text/csv' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = 'procyclone_products_template.csv';
+    a.download = 'fleppystore_products_template.csv';
     a.click();
     URL.revokeObjectURL(url);
   };
 
   const stockDotColor = (qty, threshold) => {
-    if (qty === 0) return 'var(--badge-red, #e74c3c)';
-    if (qty <= threshold) return 'var(--badge-amber, #f39c12)';
+    if (qty === 0) return '#e74c3c';
+    if (qty <= threshold) return '#f39c12';
     return 'var(--accent)';
   };
 
@@ -152,6 +152,11 @@ Water Bottle,750ml cycling bottle,25.00,100,20,Accessories`;
     if (product.stock_quantity === 0) return <span className="badge badge-red">Out of stock</span>;
     if (product.stock_quantity <= product.low_stock_threshold) return <span className="badge badge-amber">Low stock</span>;
     return <span className="badge badge-green">In stock</span>;
+  };
+
+  const getDiscount = (price, comparePrice) => {
+    if (!comparePrice || comparePrice <= price) return null;
+    return Math.round((1 - price / comparePrice) * 100);
   };
 
   return (
@@ -163,23 +168,11 @@ Water Bottle,750ml cycling bottle,25.00,100,20,Accessories`;
           <p className="page-subtitle">{total} products in inventory</p>
         </div>
         <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-          <button className="btn btn-secondary btn-sm" onClick={downloadTemplate}>
-            📥 CSV Template
-          </button>
-          <button
-            className="btn btn-secondary btn-sm"
-            onClick={() => fileInputRef.current.click()}
-            disabled={importing}
-          >
+          <button className="btn btn-secondary btn-sm" onClick={downloadTemplate}>📥 CSV Template</button>
+          <button className="btn btn-secondary btn-sm" onClick={() => fileInputRef.current.click()} disabled={importing}>
             {importing ? '⏳ Importing...' : '📤 Import CSV'}
           </button>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept=".csv"
-            style={{ display: 'none' }}
-            onChange={handleCSVImport}
-          />
+          <input ref={fileInputRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleCSVImport} />
           <button className="btn btn-primary" onClick={openAdd}>+ Add Product</button>
         </div>
       </div>
@@ -187,39 +180,23 @@ Water Bottle,750ml cycling bottle,25.00,100,20,Accessories`;
       {/* Import result banner */}
       {importResult && (
         <div className="alert alert-success" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '16px' }}>
-          <span>
-            ✅ {importResult.message}
-            {importResult.errors?.length > 0 && ` — ${importResult.errors.length} errors`}
-          </span>
-          <button
-            onClick={() => setImportResult(null)}
-            style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px', lineHeight: 1 }}
-          >✕</button>
+          <span>✅ {importResult.message}{importResult.errors?.length > 0 && ` — ${importResult.errors.length} errors`}</span>
+          <button onClick={() => setImportResult(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '16px' }}>✕</button>
         </div>
       )}
 
       {/* Search */}
       <div className="card" style={{ marginBottom: '16px' }}>
         <div className="search-bar">
-          <input
-            className="search-input"
-            placeholder="🔍 Search products..."
-            value={search}
-            onChange={e => setSearch(e.target.value)}
-          />
-          {search && (
-            <button className="btn btn-secondary btn-sm" onClick={() => setSearch('')}>Clear</button>
-          )}
+          <input className="search-input" placeholder="🔍 Search products..." value={search} onChange={e => setSearch(e.target.value)} />
+          {search && <button className="btn btn-secondary btn-sm" onClick={() => setSearch('')}>Clear</button>}
         </div>
       </div>
 
       {/* Table */}
       <div className="card">
         {loading ? (
-          <div className="loading">
-            <div className="loading-spinner" />
-            <span className="loading-text">Loading products...</span>
-          </div>
+          <div className="loading"><div className="loading-spinner" /><span className="loading-text">Loading products...</span></div>
         ) : products.length === 0 ? (
           <div className="empty-state">
             <div className="empty-icon">📦</div>
@@ -239,47 +216,64 @@ Water Bottle,750ml cycling bottle,25.00,100,20,Accessories`;
                     <th>Product</th>
                     <th>Category</th>
                     <th>Price</th>
+                    <th>Compare</th>
+                    <th>Discount</th>
                     <th>Stock</th>
                     <th>Status</th>
+                    <th>Deal</th>
+                    <th>Badge</th>
+                    <th>Rating</th>
                     <th>Actions</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {products.map(product => (
-                    <tr key={product.id}>
-                      <td>
-                        <div style={{ fontWeight: '600' }}>{product.name}</div>
-                        {product.description && (
-                          <div style={{ fontSize: '12px', color: 'var(--text-3)', marginTop: '2px' }}>
-                            {product.description.substring(0, 50)}{product.description.length > 50 ? '...' : ''}
+                  {products.map(product => {
+                    const discount = getDiscount(parseFloat(product.price), parseFloat(product.compare_price));
+                    return (
+                      <tr key={product.id}>
+                        <td>
+                          <div style={{ fontWeight: '600' }}>{product.name}</div>
+                          {product.description && (
+                            <div style={{ fontSize: '12px', color: 'var(--text-3)', marginTop: '2px' }}>
+                              {product.description.substring(0, 40)}{product.description.length > 40 ? '...' : ''}
+                            </div>
+                          )}
+                        </td>
+                        <td style={{ color: 'var(--text-2)', fontSize: '13px' }}>{product.category || '—'}</td>
+                        <td style={{ fontWeight: '700' }}>GH₵ {parseFloat(product.price || 0).toFixed(2)}</td>
+                        <td style={{ color: 'var(--text-3)', fontSize: '13px', textDecoration: 'line-through' }}>
+                          {product.compare_price ? `GH₵ ${parseFloat(product.compare_price).toFixed(2)}` : '—'}
+                        </td>
+                        <td>
+                          {discount ? <span className="badge badge-red">-{discount}%</span> : '—'}
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: stockDotColor(product.stock_quantity, product.low_stock_threshold), display: 'inline-block' }} />
+                            <span style={{ fontWeight: '600' }}>{product.stock_quantity}</span>
                           </div>
-                        )}
-                      </td>
-                      <td style={{ color: 'var(--text-2)', fontSize: '13px' }}>
-                        {product.category || '—'}
-                      </td>
-                      <td style={{ fontWeight: '600' }}>
-                        GH₵ {parseFloat(product.price || 0).toFixed(2)}
-                      </td>
-                      <td>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{
-                            width: '8px', height: '8px', borderRadius: '50%',
-                            background: stockDotColor(product.stock_quantity, product.low_stock_threshold),
-                            display: 'inline-block', flexShrink: 0,
-                          }} />
-                          <span style={{ fontWeight: '600' }}>{product.stock_quantity}</span>
-                        </div>
-                      </td>
-                      <td>{stockBadge(product)}</td>
-                      <td>
-                        <div style={{ display: 'flex', gap: '6px' }}>
-                          <button className="btn btn-secondary btn-sm" onClick={() => openEdit(product)}>Edit</button>
-                          <button className="btn btn-danger btn-sm" onClick={() => handleDelete(product.id)}>Delete</button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td>{stockBadge(product)}</td>
+                        <td>
+                          {product.is_deal
+                            ? <span className="badge badge-green">🔥 Deal</span>
+                            : <span className="badge badge-gray">No</span>}
+                        </td>
+                        <td style={{ fontSize: '12px' }}>
+                          {product.badge ? <span className="badge badge-blue">{product.badge}</span> : '—'}
+                        </td>
+                        <td style={{ fontSize: '13px' }}>
+                          {product.rating > 0 ? `⭐ ${parseFloat(product.rating).toFixed(1)} (${product.review_count})` : '—'}
+                        </td>
+                        <td>
+                          <div style={{ display: 'flex', gap: '6px' }}>
+                            <button className="btn btn-secondary btn-sm" onClick={() => openEdit(product)}>Edit</button>
+                            <button className="btn btn-danger btn-sm" onClick={() => handleDelete(product.id)}>Delete</button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -298,83 +292,104 @@ Water Bottle,750ml cycling bottle,25.00,100,20,Accessories`;
       {/* Modal */}
       {showModal && (
         <div className="modal-overlay" onClick={() => setShowModal(false)}>
-          <div className="modal" onClick={e => e.stopPropagation()}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxHeight: '90vh', overflowY: 'auto' }}>
             <div className="modal-header">
               <h2 className="modal-title">{editing ? 'Edit Product' : 'Add Product'}</h2>
               <button className="modal-close" onClick={() => setShowModal(false)}>✕</button>
             </div>
 
+            {/* Basic Info */}
             <div className="form-group">
               <label className="form-label">Product Name *</label>
-              <input
-                className="form-input"
-                value={form.name}
-                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-                placeholder="e.g. Mountain Bike Helmet"
-              />
+              <input className="form-input" value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))} placeholder="e.g. iPhone 16 Pro Max" />
             </div>
             <div className="form-group">
               <label className="form-label">Description</label>
-              <textarea
-                className="form-input"
-                rows={2}
-                value={form.description}
-                onChange={e => setForm(f => ({ ...f, description: e.target.value }))}
-                placeholder="Short description..."
-              />
+              <textarea className="form-input" rows={2} value={form.description} onChange={e => setForm(f => ({ ...f, description: e.target.value }))} placeholder="Short description..." />
             </div>
+
+            {/* Pricing */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <div className="form-group">
                 <label className="form-label">Price (GH₵) *</label>
-                <input
-                  className="form-input"
-                  type="number" min="0" step="0.01"
-                  value={form.price}
-                  onChange={e => setForm(f => ({ ...f, price: e.target.value }))}
-                  placeholder="0.00"
-                />
+                <input className="form-input" type="number" min="0" step="0.01" value={form.price} onChange={e => setForm(f => ({ ...f, price: e.target.value }))} placeholder="0.00" />
               </div>
               <div className="form-group">
-                <label className="form-label">Stock Quantity</label>
-                <input
-                  className="form-input"
-                  type="number" min="0"
-                  value={form.stock_quantity}
-                  onChange={e => setForm(f => ({ ...f, stock_quantity: e.target.value }))}
-                  placeholder="0"
-                />
+                <label className="form-label">Compare Price (GH₵)</label>
+                <input className="form-input" type="number" min="0" step="0.01" value={form.compare_price} onChange={e => setForm(f => ({ ...f, compare_price: e.target.value }))} placeholder="Original price (for discount)" />
               </div>
             </div>
+
+            {/* Stock */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
               <div className="form-group">
-                <label className="form-label">Category</label>
-                <input
-                  className="form-input"
-                  value={form.category}
-                  onChange={e => setForm(f => ({ ...f, category: e.target.value }))}
-                  placeholder="e.g. Helmets"
-                />
+                <label className="form-label">Stock Quantity</label>
+                <input className="form-input" type="number" min="0" value={form.stock_quantity} onChange={e => setForm(f => ({ ...f, stock_quantity: e.target.value }))} placeholder="0" />
               </div>
               <div className="form-group">
                 <label className="form-label">Low Stock Alert</label>
-                <input
-                  className="form-input"
-                  type="number" min="0"
-                  value={form.low_stock_threshold}
-                  onChange={e => setForm(f => ({ ...f, low_stock_threshold: e.target.value }))}
-                  placeholder="5"
-                />
+                <input className="form-input" type="number" min="0" value={form.low_stock_threshold} onChange={e => setForm(f => ({ ...f, low_stock_threshold: e.target.value }))} placeholder="5" />
               </div>
             </div>
+
+            {/* Category & Badge */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div className="form-group">
+                <label className="form-label">Category</label>
+                <input className="form-input" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} placeholder="e.g. Electronics" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Badge</label>
+                <select className="form-input" value={form.badge} onChange={e => setForm(f => ({ ...f, badge: e.target.value }))}>
+                  <option value="">No badge</option>
+                  <option value="Best Seller">Best Seller</option>
+                  <option value="New">New</option>
+                  <option value="Hot Deal">Hot Deal</option>
+                  <option value="Limited">Limited</option>
+                  <option value="Top Rated">Top Rated</option>
+                </select>
+              </div>
+            </div>
+
+            {/* Rating */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+              <div className="form-group">
+                <label className="form-label">Rating (0–5)</label>
+                <input className="form-input" type="number" min="0" max="5" step="0.1" value={form.rating} onChange={e => setForm(f => ({ ...f, rating: e.target.value }))} placeholder="e.g. 4.5" />
+              </div>
+              <div className="form-group">
+                <label className="form-label">Review Count</label>
+                <input className="form-input" type="number" min="0" value={form.review_count} onChange={e => setForm(f => ({ ...f, review_count: e.target.value }))} placeholder="e.g. 128" />
+              </div>
+            </div>
+
+            {/* Image URL */}
             <div className="form-group">
               <label className="form-label">Image URL</label>
-              <input
-                className="form-input"
-                value={form.image_url}
-                onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))}
-                placeholder="https://..."
-              />
+              <input className="form-input" value={form.image_url} onChange={e => setForm(f => ({ ...f, image_url: e.target.value }))} placeholder="https://..." />
             </div>
+
+            {/* Is Deal toggle */}
+            <div className="form-group">
+              <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
+                <input
+                  type="checkbox"
+                  checked={form.is_deal}
+                  onChange={e => setForm(f => ({ ...f, is_deal: e.target.checked }))}
+                  style={{ width: '16px', height: '16px', accentColor: 'var(--accent)' }}
+                />
+                <span className="form-label" style={{ margin: 0 }}>🔥 Mark as Deal of the Day</span>
+              </label>
+              <p style={{ fontSize: '12px', color: 'var(--text-3)', marginTop: '4px' }}>
+                Deal products appear in the "Deals of the Day" section on the storefront
+              </p>
+            </div>
+
+            {form.compare_price && form.price && parseFloat(form.compare_price) > parseFloat(form.price) && (
+              <div className="alert alert-info" style={{ fontSize: '13px' }}>
+                💡 Discount: {Math.round((1 - parseFloat(form.price) / parseFloat(form.compare_price)) * 100)}% off — customers will see this on the storefront
+              </div>
+            )}
 
             <div style={{ display: 'flex', gap: '8px', marginTop: '8px' }}>
               <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowModal(false)}>Cancel</button>
