@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ordersAPI, productsAPI, ridersAPI, cashAPI } from '../utils/api';
+import { ordersAPI, productsAPI, ridersAPI, cashAPI, paymentsAPI } from '../utils/api';
 
 
 /* ─── Helpers ─────────────────────────────────────────────────── */
@@ -68,9 +68,10 @@ const Dashboard = () => {
   const [riders,        setRiders]        = useState([]);
 
   /* Alerts */
-  const [lowStock,      setLowStock]      = useState([]);
-  const [disputes,      setDisputes]      = useState(0);
-  const [pendingCash,   setPendingCash]   = useState(0);
+  const [lowStock,        setLowStock]        = useState([]);
+  const [disputes,        setDisputes]        = useState(0);
+  const [pendingCash,     setPendingCash]     = useState(0);
+  const [pendingPayments, setPendingPayments] = useState(0);
 
   /* Recent orders */
   const [recentOrders,  setRecentOrders]  = useState([]);
@@ -95,6 +96,7 @@ const Dashboard = () => {
         productsRes,
         cashRes,
         lowStockRes,
+        paymentsRes,
       ] = await Promise.all([
         ordersAPI.getAll({ limit: 100, start_date: todayStr, end_date: todayStr }),
         ordersAPI.getAll({ limit: 100, start_date: yestStr,  end_date: yestStr  }),
@@ -102,6 +104,7 @@ const Dashboard = () => {
         productsAPI.getAll({ limit: 1 }),
         cashAPI.getAll({ limit: 100, date: todayStr }),
         productsAPI.getAll({ limit: 20, low_stock: true }),
+        paymentsAPI.getSummary(),
       ]);
 
       /* Today's orders */
@@ -150,6 +153,10 @@ const Dashboard = () => {
       );
       setLowStock(lsProducts.slice(0, 5));
 
+      /* Pending payments */
+      const pendingPay = paymentsRes.data?.pending_verification;
+      setPendingPayments(parseInt(pendingPay?.count || 0));
+
       setLastRefresh(new Date());
     } catch (err) {
       console.error('Dashboard fetchAll error:', err);
@@ -167,7 +174,7 @@ const Dashboard = () => {
   /* ── Derived ───────────────────────────────────────────────── */
   const availableRiders = riders.filter(r => r.is_available);
   const busyRiders      = riders.filter(r => !r.is_available);
-  const totalAlerts     = disputes + (lowStock.length > 0 ? 1 : 0) + (pendingCash > 0 ? 1 : 0);
+  const totalAlerts     = disputes + (lowStock.length > 0 ? 1 : 0) + (pendingCash > 0 ? 1 : 0) + (pendingPayments > 0 ? 1 : 0);
   const outForDelivery  = pipeline['out_for_delivery'] || 0;
 
   /* ── Loading ───────────────────────────────────────────────── */
@@ -224,6 +231,16 @@ const Dashboard = () => {
               onClick={() => navigate('/cash')}
             >
               🕐 <strong>{pendingCash} pending cash log{pendingCash > 1 ? 's' : ''}</strong> to verify
+              <span style={{ marginLeft: 'auto', fontSize: '11px', opacity: 0.7 }}>View →</span>
+            </div>
+          )}
+          {pendingPayments > 0 && (
+            <div
+              className="alert alert-info"
+              style={{ flex: 1, minWidth: '200px', cursor: 'pointer', margin: 0 }}
+              onClick={() => navigate('/payments')}
+            >
+              💳 <strong>{pendingPayments} payment{pendingPayments > 1 ? 's' : ''} pending verification</strong>
               <span style={{ marginLeft: 'auto', fontSize: '11px', opacity: 0.7 }}>View →</span>
             </div>
           )}
@@ -591,7 +608,18 @@ const Dashboard = () => {
                       {order.rider_name || <span style={{ color: 'var(--text-3)' }}>Unassigned</span>}
                     </td>
                     <td>
-                      <span className={`badge badge-${order.status}`}>
+                      <span className="badge" style={{
+                        background: {
+                          pending: '#fef3c7', confirmed: '#dbeafe', packing: '#ede9fe',
+                          assigned: '#ccfbf1', out_for_delivery: '#fed7aa',
+                          delivered: '#dcfce7', failed: '#fee2e2', returned: '#f1f5f9',
+                        }[order.status] || '#f1f5f9',
+                        color: {
+                          pending: '#d97706', confirmed: '#1d4ed8', packing: '#7c3aed',
+                          assigned: '#0f766e', out_for_delivery: '#c2410c',
+                          delivered: '#16a34a', failed: '#dc2626', returned: '#475569',
+                        }[order.status] || '#475569',
+                      }}>
                         {order.status?.replace(/_/g, ' ')}
                       </span>
                     </td>

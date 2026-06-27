@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { ridersAPI } from '../utils/api';
+import { ridersAPI, usersAPI } from '../utils/api';
+import { useFormValidation, FormError, inputStyle, rules } from '../utils/useFormValidation';
 import { useAuth } from '../context/AuthContext';
 
 /* ─── Constants ───────────────────────────────────────────────── */
@@ -19,6 +20,8 @@ const EMPTY_FORM = {
   momo_number: '',
   // Emergency
   emergency_name: '', emergency_phone: '', emergency_relation: '',
+  // Account link
+  user_id: '',
   // Photo & notes
   passport_photo: '', notes: '',
 };
@@ -201,7 +204,21 @@ const Riders = () => {
   const [saving,         setSaving]         = useState(false);
   const [form,           setForm]           = useState(EMPTY_FORM);
   const [activeSection,  setActiveSection]  = useState('basic');
+  const [riderUsers, setRiderUsers] = useState([]);
   const photoInputRef = useRef();
+
+  /* ── Validation ───────────────────────────────────────────────── */
+  const riderSchema = {
+    name:              [rules.required('Full name')],
+    phone:             [rules.required('Phone'), rules.phone()],
+    vehicle_number:    [],
+    ghana_card_number: [rules.ghanaCard()],
+    license_expiry:    [rules.date('Licence expiry')],
+    insurance_expiry:  [rules.date('Insurance expiry')],
+    momo_number:       [rules.phone('MoMo number')],
+    emergency_phone:   [rules.phone('Emergency phone')],
+  };
+  const { errors: fe, validateAll: va, clearError: ce, clearAll: ca } = useFormValidation(riderSchema);
 
   /* ── Fetch ─────────────────────────────────────────────────── */
   const fetchRiders = useCallback(async () => {
@@ -237,7 +254,8 @@ const Riders = () => {
     setEditing(null);
     setForm(EMPTY_FORM);
     setActiveSection('basic');
-    setShowModal(true);
+    ca();
+    fetchRiderUsers(); setShowModal(true);
   };
 
   const openEdit = (rider) => {
@@ -264,9 +282,10 @@ const Riders = () => {
       emergency_relation: rider.emergency_relation || '',
       passport_photo:     rider.passport_photo     || '',
       notes:              rider.notes              || '',
+      user_id:            rider.user_id            || '',
     });
     setActiveSection('basic');
-    setShowModal(true);
+    fetchRiderUsers(); setShowModal(true);
   };
 
   /* ── Photo upload ────────────────────────────────────────────── */
@@ -279,13 +298,38 @@ const Riders = () => {
     reader.readAsDataURL(file);
   };
 
+  /* ── Reset all riders to available ──────────────────────────── */
+  const handleResetAll = async () => {
+    const busyCount = riders.filter(r => !r.is_available).length;
+    if (busyCount === 0) return alert('All riders are already available.');
+    if (!window.confirm(`Reset all ${busyCount} busy rider${busyCount !== 1 ? 's' : ''} to Available?`)) return;
+    try {
+      const res = await ridersAPI.resetAvailability();
+      alert(res.data.message);
+      fetchRiders();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error resetting riders');
+    }
+  };
+
   /* ── Save ────────────────────────────────────────────────────── */
+  const fetchRiderUsers = async () => {
+    // fixed version below
+    try {
+      console.log('fetching rider users...');
+      const res = await usersAPI.getAll({ role: 'rider', limit: 100 });
+      console.log('rider users:', res.data);
+      setRiderUsers(res.data.users || []);
+    } catch (e) { console.error(e); }
+  };
+
   const handleSave = async () => {
-    if (!form.name || !form.phone) return alert('Name and phone are required');
+    if (!va(form)) return;
     try {
       setSaving(true);
       if (editing) {
-        await ridersAPI.update(editing.id, form);
+        const payload = { ...form, user_id: form.user_id ? parseInt(form.user_id) : null };
+        await ridersAPI.update(editing.id, payload);
       } else {
         await ridersAPI.create(form);
       }
@@ -345,6 +389,15 @@ const Riders = () => {
               onClick={() => setViewMode('table')}
             >☰ Table</button>
           </div>
+          {isSuperAdmin && riders.some(r => !r.is_available) && (
+            <button
+              className="btn btn-secondary btn-sm"
+              onClick={handleResetAll}
+              style={{ color: '#f59e0b', borderColor: '#f59e0b' }}
+            >
+              🔄 Reset All to Available
+            </button>
+          )}
           <button className="btn btn-primary" onClick={openAdd}>+ Add Rider</button>
         </div>
       </div>
@@ -583,11 +636,13 @@ const Riders = () => {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div className="form-group">
                     <label className="form-label">Full Name *</label>
-                    <input {...f('name')} placeholder="e.g. Kwame Asante" />
+                    <input {...f('name')} style={inputStyle(fe.name)} placeholder="e.g. Kwame Asante" onChange={e=>{setForm(p=>({...p,name:e.target.value}));ce('name');}} />
+                  <FormError error={fe.name} />
                   </div>
                   <div className="form-group">
                     <label className="form-label">Phone *</label>
-                    <input {...f('phone')} placeholder="e.g. 0244123456" />
+                    <input {...f('phone')} style={inputStyle(fe.phone)} placeholder="e.g. 0244123456" onChange={e=>{setForm(p=>({...p,phone:e.target.value}));ce('phone');}} />
+                  <FormError error={fe.phone} />
                   </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
@@ -622,8 +677,18 @@ const Riders = () => {
                   </div>
                   <div className="form-group">
                     <label className="form-label">MoMo Number</label>
-                    <input {...f('momo_number')} placeholder="e.g. 0244123456" />
+                    <input {...f('momo_number')} style={inputStyle(fe.momo_number)} placeholder="e.g. 0244123456" onChange={e=>{setForm(p=>({...p,momo_number:e.target.value}));ce('momo_number');}} />
+                  <FormError error={fe.momo_number} />
                   </div>
+                </div>
+
+                <div className="form-group" style={{ marginTop: "12px", padding: "14px", background: "#f0fdf4", borderRadius: "10px", border: "1px solid #bbf7d0" }}>
+                  <label className="form-label">🔗 Link Staff Account (optional)</label>
+                  <select className="form-input" value={form.user_id || ''} onChange={e => setForm(p => ({...p, user_id: e.target.value}))}>
+                    <option value="">-- No account linked --</option>
+                    {riderUsers.map(u => <option key={u.id} value={u.id}>{u.name} ({u.email})</option>)}
+                  </select>
+                  <p style={{ fontSize: "12px", color: "#16a34a", margin: "6px 0 0", fontWeight: "500" }}>Link a staff account with role=rider so they can log into the Rider Portal.</p>
                 </div>
               </div>
             )}
@@ -652,7 +717,8 @@ const Riders = () => {
                 </div>
                 <div className="form-group">
                   <label className="form-label">Ghana Card Number</label>
-                  <input {...f('ghana_card_number')} placeholder="GHA-000000000-0" style={{ fontFamily: 'monospace' }} />
+                  <input {...f('ghana_card_number')} style={{fontFamily:'monospace',...inputStyle(fe.ghana_card_number)}} placeholder="GHA-000000000-0" onChange={e=>{setForm(p=>({...p,ghana_card_number:e.target.value}));ce('ghana_card_number');}} />
+                <FormError error={fe.ghana_card_number} />
                 </div>
               </div>
             )}
@@ -711,7 +777,8 @@ const Riders = () => {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div className="form-group">
                     <label className="form-label">Contact Phone</label>
-                    <input {...f('emergency_phone')} placeholder="e.g. 0201234567" />
+                    <input {...f('emergency_phone')} style={inputStyle(fe.emergency_phone)} placeholder="e.g. 0201234567" onChange={e=>{setForm(p=>({...p,emergency_phone:e.target.value}));ce('emergency_phone');}} />
+                  <FormError error={fe.emergency_phone} />
                   </div>
                   <div className="form-group">
                     <label className="form-label">Relationship</label>

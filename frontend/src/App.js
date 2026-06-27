@@ -18,8 +18,20 @@ import Reports from './pages/Reports';
 import Receipts from './pages/Receipts';
 import Billing from './pages/Billing';
 import Settings from './pages/Settings';
+import Chat from './pages/Chat';
 import DeliveryBoard from './pages/DeliveryBoard';
+import Settlements from './pages/Settlements';
 import './App.css';
+import Profile   from './pages/Profile';
+import Expenses from './pages/Expenses';
+import RBAC from './pages/RBAC';
+import PortalLayout from './pages/portal/PortalLayout';
+import PortalHome from './pages/portal/PortalHome';
+import PortalCash from './pages/portal/PortalCash';
+import PortalProfile from './pages/portal/PortalProfile';
+import PortalMessages from './pages/portal/PortalMessages';
+import PortalDeliveries from './pages/portal/PortalDeliveries';
+import AuditLog  from './pages/AuditLog';
 
 const Layout = ({ children }) => {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -55,7 +67,18 @@ function App() {
           <Route path="/billing" element={<PrivateRoute><Layout><Billing /></Layout></PrivateRoute>} />
           <Route path="/users" element={<PrivateRoute><Layout><Staff /></Layout></PrivateRoute>} />
           <Route path="/settings" element={<PrivateRoute><Layout><Settings /></Layout></PrivateRoute>} />
-<Route path="/delivery" element={<PrivateRoute><Layout><DeliveryBoard /></Layout></PrivateRoute>} />
+          <Route path="/chat" element={<PrivateRoute><Layout><Chat /></Layout></PrivateRoute>} />
+          <Route path="/delivery" element={<PrivateRoute><Layout><DeliveryBoard /></Layout></PrivateRoute>} />
+          <Route path="/settlements" element={<PrivateRoute><Layout><Settlements /></Layout></PrivateRoute>} />   
+          <Route path="/profile"   element={<Profile />} />
+          <Route path="/expenses" element={<PrivateRoute><Layout><Expenses /></Layout></PrivateRoute>} />
+          <Route path="/rbac" element={<PrivateRoute><Layout><RBAC /></Layout></PrivateRoute>} />
+          <Route path="/portal" element={<PrivateRoute><PortalLayout><PortalHome /></PortalLayout></PrivateRoute>} />
+          <Route path="/portal/cash" element={<PrivateRoute><PortalLayout><PortalCash /></PortalLayout></PrivateRoute>} />
+          <Route path="/portal/deliveries" element={<PrivateRoute><PortalLayout><PortalDeliveries /></PortalLayout></PrivateRoute>} />
+          <Route path="/portal/messages" element={<PrivateRoute><PortalLayout><PortalMessages /></PortalLayout></PrivateRoute>} />
+          <Route path="/portal/profile" element={<PrivateRoute><PortalLayout><PortalProfile /></PortalLayout></PrivateRoute>} />
+          <Route path="/audit-log" element={<PrivateRoute><Layout><AuditLog /></Layout></PrivateRoute>} />  
           <Route path="*" element={<Navigate to="/" />} />
         </Routes>
       </BrowserRouter>

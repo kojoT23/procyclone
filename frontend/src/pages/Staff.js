@@ -1,9 +1,10 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { usersAPI } from '../utils/api';
+import { useFormValidation, FormError, inputStyle, rules } from '../utils/useFormValidation';
 import { useAuth } from '../context/AuthContext';
 
 /* ─── Constants ───────────────────────────────────────────────── */
-const ROLES = ['super_admin','admin','manager','cashier','dispatcher','warehouse','rider'];
+const ROLES = ['super_admin','admin','manager','accountant','customer_support','cashier','dispatcher','warehouse','auditor','rider'];
 
 const ROLE_BADGE = {
   super_admin: 'badge badge-red',
@@ -172,6 +173,17 @@ const Staff = () => {
   const [activeSection, setActiveSection] = useState('account');
   const photoInputRef = useRef();
 
+  /* ── Validation schema ───────────────────────────────────────── */
+  const staffSchema = {
+    name:              [rules.required('Full name')],
+    email:             [rules.required('Email'), rules.email()],
+    password:          editing ? [] : [rules.required('Password'), rules.minLength(8, 'Password'), rules.hasNumber('Password')],
+    phone:             [rules.phone()],
+    ghana_card_number: [rules.ghanaCard()],
+    emergency_phone:   [rules.phone('Emergency phone')],
+  };
+  const { errors: fe, validateAll: va, clearError: ce, clearAll: ca } = useFormValidation(staffSchema);
+
   /* ── Fetch ─────────────────────────────────────────────────── */
   const fetchUsers = useCallback(async () => {
     try {
@@ -198,6 +210,7 @@ const Staff = () => {
     setEditing(null);
     setForm(EMPTY_FORM);
     setActiveSection('account');
+    ca();
     setShowModal(true);
   };
 
@@ -239,14 +252,8 @@ const Staff = () => {
 
   /* ── Save ────────────────────────────────────────────────────── */
   const handleSave = async () => {
-    if (!form.name || !form.email) return alert('Name and email are required');
-    if (!editing && !form.password) return alert('Password is required for new staff');
-    if (!editing && form.password.length < 8) return alert('Password must be at least 8 characters');
-
-    // Non-super-admins cannot assign super_admin role
-    if (form.role === 'super_admin' && !isSuperAdmin) {
-      return alert('Only Super Admin can assign the Super Admin role');
-    }
+    if (!va(form)) return;
+    if (form.role === 'super_admin' && !isSuperAdmin) return alert('Only Super Admin can assign the Super Admin role');
 
     try {
       setSaving(true);
@@ -522,16 +529,19 @@ const Staff = () => {
               <div>
                 <div className="form-group">
                   <label className="form-label">Full Name *</label>
-                  <input {...f('name')} placeholder="e.g. Ama Owusu" />
+                  <input {...f('name')} style={inputStyle(fe.name)} placeholder="e.g. Ama Owusu" onChange={e => { setForm(p=>({...p,name:e.target.value})); ce('name'); }} />
+              <FormError error={fe.name} />
                 </div>
                 <div className="form-group">
                   <label className="form-label">Email Address *</label>
-                  <input {...f('email')} type="email" placeholder="e.g. ama@shorewinds.com" />
+                  <input {...f('email')} type="email" style={inputStyle(fe.email)} placeholder="e.g. ama@procyclone.com" onChange={e => { setForm(p=>({...p,email:e.target.value})); ce('email'); }} />
+              <FormError error={fe.email} />
                 </div>
                 {!editing && (
                   <div className="form-group">
                     <label className="form-label">Password *</label>
-                    <input {...f('password')} type="password" placeholder="Min 8 characters, 1 number" />
+                    <input {...f('password')} type="password" style={inputStyle(fe.password)} placeholder="Min 8 characters, 1 number" onChange={e => { setForm(p=>({...p,password:e.target.value})); ce('password'); }} />
+              <FormError error={fe.password} />
                   </div>
                 )}
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
@@ -545,7 +555,8 @@ const Staff = () => {
                   </div>
                   <div className="form-group">
                     <label className="form-label">Phone</label>
-                    <input {...f('phone')} placeholder="e.g. 0244123456" />
+                    <input {...f('phone')} style={inputStyle(fe.phone)} placeholder="e.g. 0244123456" onChange={e => { setForm(p=>({...p,phone:e.target.value})); ce('phone'); }} />
+              <FormError error={fe.phone} />
                   </div>
                 </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
@@ -582,7 +593,8 @@ const Staff = () => {
                 </div>
                 <div className="form-group">
                   <label className="form-label">Ghana Card Number</label>
-                  <input {...f('ghana_card_number')} placeholder="e.g. GHA-000000000-0" style={{ fontFamily: 'monospace' }} />
+                  <input {...f('ghana_card_number')} style={{fontFamily:'monospace',...inputStyle(fe.ghana_card_number)}} placeholder="GHA-000000000-0" onChange={e => { setForm(p=>({...p,ghana_card_number:e.target.value})); ce('ghana_card_number'); }} />
+                  <FormError error={fe.ghana_card_number} />
                   <p style={{ fontSize: '12px', color: 'var(--text-3)', margin: '4px 0 0' }}>
                     Format: GHA-XXXXXXXXX-X
                   </p>
@@ -603,7 +615,8 @@ const Staff = () => {
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div className="form-group">
                     <label className="form-label">Contact Phone</label>
-                    <input {...f('emergency_phone')} placeholder="e.g. 0201234567" />
+                    <input {...f('emergency_phone')} style={inputStyle(fe.emergency_phone)} placeholder="e.g. 0201234567" onChange={e => { setForm(p=>({...p,emergency_phone:e.target.value})); ce('emergency_phone'); }} />
+                  <FormError error={fe.emergency_phone} />
                   </div>
                   <div className="form-group">
                     <label className="form-label">Relationship</label>

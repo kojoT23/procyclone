@@ -1,12 +1,13 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { ordersAPI, ridersAPI } from '../utils/api';
 import API from '../utils/api';
-
+import Settlements from './Settlements';
 /* ─── Delivery API ────────────────────────────────────────────── */
 const deliveryAPI = {
-  assign:       (data)         => API.post('/riders/assign', data),
-  updateStatus: (id, data)     => API.put(`/riders/delivery/${id}/status`, data),
-  getActive:    (params)       => API.get('/orders', { params }),
+  assign:           (data)     => API.post('/riders/assign', data),
+  updateStatus:     (id, data) => API.put(`/riders/delivery/${id}/status`, data),
+  getActive:        (params)   => API.get('/orders', { params }),
+  resetAvailability: ()        => API.post('/riders/reset-availability'),
 };
 
 /* ─── Status config ───────────────────────────────────────────── */
@@ -20,7 +21,6 @@ const STATUS = {
   failed:           { label: 'Failed',         color: '#ef4444', bg: '#fef2f2', border: '#fecaca' },
 };
 
-const DELIVERY_STATUSES = ['picked_up', 'delivered', 'failed'];
 
 /* ─── Helpers ─────────────────────────────────────────────────── */
 const timeAgo = (date) => {
@@ -283,6 +283,18 @@ const DeliveryBoard = () => {
     }
   };
 
+  /* ── Reset all rider availability ────────────────────────────── */
+  const handleResetAvailability = async () => {
+    if (!window.confirm('Reset ALL riders to available? Only do this if deliveries are complete.')) return;
+    try {
+      const res = await deliveryAPI.resetAvailability();
+      alert(res.data.message);
+      fetchAll();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error resetting riders');
+    }
+  };
+
   /* ── Derived ───────────────────────────────────────────────── */
   const activeStatuses   = ['pending', 'confirmed', 'packing', 'assigned', 'out_for_delivery'];
   const availableRiders  = riders.filter(r => r.is_available);
@@ -325,9 +337,14 @@ const DeliveryBoard = () => {
             )}
           </p>
         </div>
-        <button className="btn btn-secondary btn-sm" onClick={fetchAll}>
-          ↻ Refresh
-        </button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button className="btn btn-secondary btn-sm" onClick={fetchAll}>
+            ↻ Refresh
+          </button>
+          <button className="btn btn-danger btn-sm" onClick={handleResetAvailability}>
+            ⊕ Reset All Riders
+          </button>
+        </div>
       </div>
 
       {/* ── Summary cards ───────────────────────────────────── */}

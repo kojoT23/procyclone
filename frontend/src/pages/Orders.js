@@ -1,6 +1,28 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ordersAPI, customersAPI, productsAPI } from '../utils/api';
+import { ordersAPI, customersAPI, productsAPI, deliveryZonesAPI, pricingSettingsAPI } from '../utils/api';
+import { useFormValidation, FormError, inputStyle, rules } from '../utils/useFormValidation';
 import { useAuth } from '../context/AuthContext';
+
+/* ─── CSV helper ──────────────────────────────────────────────── */
+const downloadCSV = (rows, filename) => {
+  if (!rows.length) return;
+  const headers = Object.keys(rows[0]);
+  const csv = [
+    headers.join(','),
+    ...rows.map(r =>
+      headers.map(h => {
+        const v = r[h] ?? '';
+        return typeof v === 'string' && (v.includes(',') || v.includes('"'))
+          ? `"${v.replace(/"/g, '""')}"` : v;
+      }).join(',')
+    ),
+  ].join('\n');
+  const blob = new Blob([csv], { type: 'text/csv' });
+  const url  = URL.createObjectURL(blob);
+  const a    = document.createElement('a');
+  a.href = url; a.download = filename; a.click();
+  URL.revokeObjectURL(url);
+};
 
 /* ─── Constants ───────────────────────────────────────────────── */
 const STATUS_COLORS = {
@@ -19,7 +41,7 @@ const STATUSES = [
   'out_for_delivery', 'delivered', 'failed', 'returned',
 ];
 
-/* ─── Payment badge ───────────────────────────────────────────── */
+/* ─── Badges ──────────────────────────────────────────────────── */
 const PaymentBadge = ({ method }) => {
   const cls =
     method === 'momo' ? 'badge badge-blue'  :
@@ -33,15 +55,11 @@ const PaymentBadge = ({ method }) => {
   return <span className={cls}>{label}</span>;
 };
 
-/* ─── Status badge ────────────────────────────────────────────── */
 const StatusBadge = ({ status }) => (
-  <span
-    className="badge"
-    style={{
-      background: STATUS_COLORS[status]?.bg || '#f1f5f9',
-      color:      STATUS_COLORS[status]?.text || '#475569',
-    }}
-  >
+  <span className="badge" style={{
+    background: STATUS_COLORS[status]?.bg || '#f1f5f9',
+    color:      STATUS_COLORS[status]?.text || '#475569',
+  }}>
     {status?.replace(/_/g, ' ')}
   </span>
 );
@@ -59,6 +77,13 @@ const WhatsAppIcon = () => (
 const Orders = () => {
   const { user: currentUser } = useAuth();
   const isSuperAdmin = currentUser?.role === 'super_admin';
+
+  /* Validation */
+  const orderSchema = {
+    customer_id:      [rules.required('Customer')],
+    delivery_address: [rules.required('Delivery address')],
+  };
+  const { errors: fe, validateAll: va, clearError: ce, clearAll: ca } = useFormValidation(orderSchema);
 
   /* List state */
   const [orders,        setOrders]        = useState([]);
@@ -90,9 +115,12 @@ const Orders = () => {
   const [orderForm,       setOrderForm]       = useState({
     customer_id: '', payment_method: 'momo',
     momo_reference: '', delivery_address: '', notes: '', items: [],
+    delivery_zone_id: '', manual_discount: '', discount_reason: '',
   });
+  const [zones,           setZones]           = useState([]);
+  const [pricingSettings, setPricingSettings] = useState(null);
 
-  /* ── Fetch orders ────────────────────────────────────────────── */
+  /* ── Fetch orders ─────────────────────────────────────────── */
   const fetchOrders = useCallback(async () => {
     try {
       setLoading(true);
@@ -100,7 +128,11 @@ const Orders = () => {
       if (search)        params.search         = search;
       if (filterStatus)  params.status         = filterStatus;
       if (filterPayment) params.payment_method = filterPayment;
-      if (filterDate)    params.date           = filterDate;
+      /* Fix: use start_date/end_date — backend expects these not 'date' */
+      if (filterDate) {
+        params.start_date = filterDate;
+        params.end_date   = filterDate;
+      }
       const res = await ordersAPI.getAll(params);
       setOrders(res.data.orders || []);
       setTotal(res.data.total   || 0);
@@ -115,7 +147,7 @@ const Orders = () => {
   useEffect(() => { fetchOrders(); }, [fetchOrders]);
   useEffect(() => { setPage(1); }, [search, filterStatus, filterPayment, filterDate]);
 
-  /* ── Open order detail — fetch items ─────────────────────────── */
+  /* ── Open order detail ────────────────────────────────────── */
   const openDetail = async (order) => {
     setSelectedOrder(order);
     setOrderItems([]);
@@ -130,16 +162,24 @@ const Orders = () => {
     }
   };
 
-  /* ── Open create modal ────────────────────────────────────────── */
+  /* ── Open create modal ────────────────────────────────────── */
   const openCreate = async () => {
     try {
-      const [custRes, prodRes] = await Promise.all([
+      const [custRes, prodRes, zonesRes, pricingRes] = await Promise.all([
         customersAPI.getAll({ limit: 100 }),
         productsAPI.getAll({ limit: 100 }),
+        deliveryZonesAPI.getAll(),
+        pricingSettingsAPI.get(),
       ]);
       setCustomers(custRes.data.customers || []);
       setProducts(prodRes.data.products?.filter(p => p.stock_quantity > 0) || []);
-      setOrderForm({ customer_id: '', payment_method: 'momo', momo_reference: '', delivery_address: '', notes: '', items: [] });
+      setZones((zonesRes.data.zones || []).filter(z => z.is_active));
+      setPricingSettings(pricingRes.data.settings || null);
+      setOrderForm({
+        customer_id: '', payment_method: 'momo', momo_reference: '', delivery_address: '', notes: '', items: [],
+        delivery_zone_id: '', manual_discount: '', discount_reason: '',
+      });
+      ca();
       setSelectedProduct('');
       setSelectedQty(1);
       setShowCreate(true);
@@ -148,7 +188,7 @@ const Orders = () => {
     }
   };
 
-  /* ── Add / remove / update items ─────────────────────────────── */
+  /* ── Add / remove / update items ─────────────────────────── */
   const addItem = () => {
     if (!selectedProduct) return;
     const product = products.find(p => p.id === parseInt(selectedProduct));
@@ -180,22 +220,47 @@ const Orders = () => {
   const updateItemQty = (pid, qty) => qty < 1 ? removeItem(pid) : setOrderForm(f => ({
     ...f, items: f.items.map(i => i.product_id === pid ? { ...i, quantity: qty } : i),
   }));
-
   const orderTotal = orderForm.items.reduce((s, i) => s + i.unit_price * i.quantity, 0);
 
-  /* ── Create order ─────────────────────────────────────────────── */
+  /* ── Preview calculations — these are ESTIMATES only.
+     The real fee/discount are always recalculated server-side in
+     createOrder, including any time-based surcharge. We deliberately
+     don't duplicate the surcharge logic here, since keeping two
+     copies of that rule in sync is a real source of bugs — the
+     backend is the single source of truth for the final number. ── */
+  const selectedZone = zones.find(z => z.id === parseInt(orderForm.delivery_zone_id)) || null;
+  const freeDeliveryThreshold = pricingSettings?.free_delivery_threshold;
+  const qualifiesForFreeDelivery = freeDeliveryThreshold != null && orderTotal >= parseFloat(freeDeliveryThreshold);
+  const estimatedFee = selectedZone
+    ? (qualifiesForFreeDelivery ? 0 : parseFloat(selectedZone.fee))
+    : 0;
+  const belowZoneMinimum = selectedZone?.min_order_amount > 0 && orderTotal < parseFloat(selectedZone.min_order_amount);
+
+  const maxDiscountCap = pricingSettings
+    ? (pricingSettings.max_manual_discount_type === 'percent'
+        ? orderTotal * (parseFloat(pricingSettings.max_manual_discount) / 100)
+        : parseFloat(pricingSettings.max_manual_discount))
+    : 0;
+  const manualDiscountValue = parseFloat(orderForm.manual_discount) || 0;
+  const discountExceedsCap = manualDiscountValue > maxDiscountCap;
+
+  const estimatedTotal = Math.max(0, orderTotal + estimatedFee - manualDiscountValue);
+
+  /* ── Create order ─────────────────────────────────────────── */
   const handleCreateOrder = async () => {
-    if (!orderForm.customer_id)     return alert('Please select a customer');
-    if (!orderForm.items.length)    return alert('Please add at least one product');
-    if (!orderForm.delivery_address) return alert('Please enter a delivery address');
+    if (!va(orderForm)) return;
+    if (!orderForm.items.length) return alert('Please add at least one product');
     try {
       setSaving(true);
       await ordersAPI.create({
         customer_id:      parseInt(orderForm.customer_id),
-        payment_method:   orderForm.payment_method === 'cod' ? 'cod' : orderForm.payment_method,
+        payment_method:   orderForm.payment_method,
         momo_reference:   orderForm.payment_method === 'momo' ? orderForm.momo_reference : undefined,
         delivery_address: orderForm.delivery_address,
         notes:            orderForm.notes,
+        delivery_zone_id: orderForm.delivery_zone_id ? parseInt(orderForm.delivery_zone_id) : undefined,
+        manual_discount:  orderForm.manual_discount ? parseFloat(orderForm.manual_discount) : undefined,
+        discount_reason:  orderForm.discount_reason || undefined,
         items: orderForm.items.map(i => ({
           product_id: i.product_id,
           quantity:   i.quantity,
@@ -211,7 +276,7 @@ const Orders = () => {
     }
   };
 
-  /* ── Update status ────────────────────────────────────────────── */
+  /* ── Update status ────────────────────────────────────────── */
   const updateStatus = async (orderId, status) => {
     try {
       setUpdating(orderId);
@@ -225,7 +290,7 @@ const Orders = () => {
     }
   };
 
-  /* ── Delete order ─────────────────────────────────────────────── */
+  /* ── Delete order ─────────────────────────────────────────── */
   const handleDelete = async (order) => {
     if (!window.confirm(`Delete order ${order.order_number}? This cannot be undone.`)) return;
     try {
@@ -240,15 +305,32 @@ const Orders = () => {
     }
   };
 
-  /* ── WhatsApp notification ────────────────────────────────────── */
+  /* ── WhatsApp notification ────────────────────────────────── */
   const sendWhatsApp = (order) => {
-    const msg = `Hi ${order.customer_name || 'Customer'}, your ProCyclone order ${order.order_number} is now *${order.status?.replace(/_/g, ' ')}*. Total: GH₵ ${parseFloat(order.total_amount).toFixed(2)}. Thank you!`;
+    const msg = `Hi ${order.customer_name || 'Customer'}, your Shorewinds order ${order.order_number} is now *${order.status?.replace(/_/g, ' ')}*. Total: GH₵ ${parseFloat(order.total_amount).toFixed(2)}. Thank you!`;
     const phone = order.customer_phone?.replace(/\D/g, '');
     const intlPhone = phone?.startsWith('0') ? '233' + phone.slice(1) : phone;
     window.open(`https://wa.me/${intlPhone}?text=${encodeURIComponent(msg)}`, '_blank');
   };
 
-  /* ── Derived counts ───────────────────────────────────────────── */
+  /* ── CSV export ───────────────────────────────────────────── */
+  const exportCSV = () => {
+    downloadCSV(
+      orders.map(o => ({
+        'Order #':       o.order_number,
+        Customer:        o.customer_name || '',
+        Phone:           o.customer_phone || '',
+        Status:          o.status?.replace(/_/g, ' '),
+        Payment:         o.payment_method?.toUpperCase(),
+        'Amount (GH₵)':  parseFloat(o.total_amount || 0).toFixed(2),
+        Rider:           o.rider_name || '',
+        Address:         o.delivery_address || '',
+        Date:            new Date(o.created_at).toLocaleDateString('en-GB'),
+      })),
+      `orders-${new Date().toISOString().split('T')[0]}.csv`
+    );
+  };
+
   const pendingCount = orders.filter(o => o.status === 'pending').length;
 
   /* ══════════════════════════════════════════════════════════════
@@ -261,11 +343,13 @@ const Orders = () => {
         <div>
           <h1 className="page-title">Orders</h1>
           <p className="page-subtitle">
-            {total} total orders
-            {pendingCount > 0 && ` · ${pendingCount} pending`}
+            {total} total · {pendingCount > 0 ? `${pendingCount} pending` : 'all up to date'}
           </p>
         </div>
-        <button className="btn btn-primary" onClick={openCreate}>+ New Order</button>
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <button className="btn btn-secondary btn-sm" onClick={exportCSV}>⬇ Export CSV</button>
+          <button className="btn btn-primary" onClick={openCreate}>+ New Order</button>
+        </div>
       </div>
 
       {/* Pending alert */}
@@ -281,10 +365,10 @@ const Orders = () => {
         <div className="search-bar">
           <input
             className="form-input"
-            placeholder="🔍 Search by order #, customer name or phone…"
+            placeholder="Search by order #, customer name or phone…"
             value={search}
             onChange={e => setSearch(e.target.value)}
-            style={{ flex: 1 }}
+            style={{ flex: 1, minWidth: '180px' }}
           />
           <input
             type="date"
@@ -321,6 +405,9 @@ const Orders = () => {
               Clear
             </button>
           )}
+          <span style={{ marginLeft: 'auto', fontSize: '12px', color: 'var(--text-3)', whiteSpace: 'nowrap' }}>
+            {total} result{total !== 1 ? 's' : ''}
+          </span>
         </div>
       </div>
 
@@ -333,7 +420,7 @@ const Orders = () => {
           </div>
         ) : orders.length === 0 ? (
           <div className="empty-state">
-            <div className="empty-icon">🛍️</div>
+            <div className="empty-icon">⊡</div>
             <h3>No orders found</h3>
             <p>{search || filterStatus || filterPayment || filterDate ? 'No orders match your filters.' : 'Create your first order.'}</p>
             {!search && !filterStatus && !filterPayment && !filterDate && (
@@ -348,6 +435,7 @@ const Orders = () => {
                   <tr>
                     <th>Order #</th>
                     <th>Customer</th>
+                    <th>Rider</th>
                     <th>Status</th>
                     <th>Payment</th>
                     <th>Amount</th>
@@ -357,35 +445,42 @@ const Orders = () => {
                 </thead>
                 <tbody>
                   {orders.map(order => (
-                    <tr
-                      key={order.id}
-                      style={order.status === 'pending' ? { borderLeft: '3px solid #f59e0b' } : {}}
-                    >
+                    <tr key={order.id} style={order.status === 'pending' ? { borderLeft: '3px solid #f59e0b' } : {}}>
                       <td>
                         <span
-                          style={{ fontFamily: 'monospace', fontSize: '12px', fontWeight: '600', color: 'var(--navy)', cursor: 'pointer', textDecoration: 'underline dotted' }}
+                          style={{ fontFamily: 'var(--font-mono)', fontSize: '12px', fontWeight: '700', color: 'var(--navy)', cursor: 'pointer', textDecoration: 'underline dotted' }}
                           onClick={() => openDetail(order)}
                         >
                           {order.order_number}
                         </span>
                       </td>
                       <td>
-                        <div style={{ fontWeight: '600' }}>{order.customer_name || '—'}</div>
+                        <div style={{ fontWeight: '600', fontSize: '13px' }}>{order.customer_name || '—'}</div>
                         <div style={{ fontSize: '11px', color: 'var(--text-3)' }}>{order.customer_phone}</div>
+                      </td>
+                      <td style={{ fontSize: '13px', color: 'var(--text-2)' }}>
+                        {order.rider_name || <span style={{ color: 'var(--text-3)', fontStyle: 'italic' }}>Unassigned</span>}
                       </td>
                       <td><StatusBadge status={order.status} /></td>
                       <td><PaymentBadge method={order.payment_method} /></td>
-                      <td style={{ fontWeight: '700', color: 'var(--accent, #22c55e)' }}>
+                      <td style={{ fontWeight: '700', color: 'var(--accent)', whiteSpace: 'nowrap' }}>
                         GH₵ {parseFloat(order.total_amount || 0).toFixed(2)}
                       </td>
                       <td style={{ color: 'var(--text-3)', fontSize: '12px', whiteSpace: 'nowrap' }}>
                         {new Date(order.created_at).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })}
                       </td>
                       <td>
-                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
                           <select
                             className="form-input"
-                            style={{ width: 'auto', fontSize: '12px', padding: '5px 28px 5px 8px', minWidth: '130px' }}
+                            style={{
+                              fontSize: '11px', padding: '4px 24px 4px 7px',
+                              width: 'auto', minWidth: '110px',
+                              background: STATUS_COLORS[order.status]?.bg || '#f1f5f9',
+                              color: STATUS_COLORS[order.status]?.text || '#475569',
+                              fontWeight: '600', border: 'none',
+                              borderRadius: 'var(--radius-xs)',
+                            }}
                             value={order.status}
                             disabled={updating === order.id}
                             onChange={e => updateStatus(order.id, e.target.value)}
@@ -394,7 +489,7 @@ const Orders = () => {
                           </select>
                           <button
                             className="btn btn-success btn-sm"
-                            style={{ padding: '6px 10px' }}
+                            style={{ padding: '5px 8px' }}
                             onClick={() => sendWhatsApp(order)}
                             title="Send WhatsApp update"
                           >
@@ -403,13 +498,11 @@ const Orders = () => {
                           {isSuperAdmin && (
                             <button
                               className="btn btn-danger btn-sm"
-                              style={{ padding: '6px 10px' }}
+                              style={{ padding: '5px 8px' }}
                               onClick={() => handleDelete(order)}
                               disabled={deleting === order.id}
                               title="Delete order"
-                            >
-                              🗑
-                            </button>
+                            >🗑</button>
                           )}
                         </div>
                       </td>
@@ -419,7 +512,6 @@ const Orders = () => {
               </table>
             </div>
 
-            {/* Pagination */}
             {pages > 1 && (
               <div className="pagination">
                 <span className="pagination-info">Page {page} of {pages} · {total} orders</span>
@@ -431,20 +523,17 @@ const Orders = () => {
         )}
       </div>
 
-      {/* ══════════════════════════════════════════════════════════
-          Order Detail Modal
-      ══════════════════════════════════════════════════════════ */}
+      {/* ── Order Detail Modal ────────────────────────────────── */}
       {selectedOrder && (
         <div className="modal-overlay" onClick={() => setSelectedOrder(null)}>
           <div className="modal" style={{ maxWidth: '560px' }} onClick={e => e.stopPropagation()}>
             <div className="modal-header">
-              <h2 className="modal-title" style={{ fontFamily: 'monospace', fontSize: '16px' }}>
+              <h2 className="modal-title" style={{ fontFamily: 'var(--font-mono)', fontSize: '15px' }}>
                 {selectedOrder.order_number}
               </h2>
               <button className="modal-close" onClick={() => setSelectedOrder(null)}>✕</button>
             </div>
 
-            {/* Summary grid */}
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '16px' }}>
               {[
                 { label: 'Customer', value: selectedOrder.customer_name, sub: selectedOrder.customer_phone },
@@ -452,7 +541,7 @@ const Orders = () => {
               ].map(({ label, value, sub, accent }) => (
                 <div key={label} style={{ background: 'var(--bg)', borderRadius: '8px', padding: '12px' }}>
                   <p style={{ color: 'var(--text-3)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', margin: '0 0 4px' }}>{label}</p>
-                  <p style={{ fontWeight: accent ? '800' : '600', fontSize: accent ? '20px' : '14px', color: accent ? 'var(--accent, #22c55e)' : 'inherit', margin: 0 }}>{value}</p>
+                  <p style={{ fontWeight: accent ? '800' : '600', fontSize: accent ? '20px' : '14px', color: accent ? 'var(--accent)' : 'inherit', margin: 0 }}>{value}</p>
                   {sub && <p style={{ color: 'var(--text-3)', fontSize: '12px', margin: '2px 0 0' }}>{sub}</p>}
                 </div>
               ))}
@@ -466,15 +555,26 @@ const Orders = () => {
               </div>
             </div>
 
-            {/* Delivery address */}
-            {selectedOrder.delivery_address && (
-              <div style={{ background: 'var(--bg)', borderRadius: '8px', padding: '12px', marginBottom: '12px' }}>
-                <p style={{ color: 'var(--text-3)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', margin: '0 0 4px' }}>Delivery Address</p>
-                <p style={{ margin: 0, fontSize: '13px' }}>{selectedOrder.delivery_address}</p>
+            {/* Rider */}
+            {selectedOrder.rider_name && (
+              <div style={{ background: '#f0fdfa', border: '1px solid #99f6e4', borderRadius: '8px', padding: '12px', marginBottom: '12px', display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: '#14b8a6', color: 'white', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700', fontSize: '13px', flexShrink: 0 }}>
+                  {selectedOrder.rider_name.charAt(0)}
+                </div>
+                <div>
+                  <p style={{ margin: 0, fontWeight: '600', fontSize: '13px' }}>{selectedOrder.rider_name}</p>
+                  <p style={{ margin: 0, fontSize: '11px', color: 'var(--text-3)' }}>{selectedOrder.rider_phone} · Assigned rider</p>
+                </div>
               </div>
             )}
 
-            {/* Notes */}
+            {selectedOrder.delivery_address && (
+              <div style={{ background: 'var(--bg)', borderRadius: '8px', padding: '12px', marginBottom: '12px' }}>
+                <p style={{ color: 'var(--text-3)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', margin: '0 0 4px' }}>Delivery Address</p>
+                <p style={{ margin: 0, fontSize: '13px' }}>📍 {selectedOrder.delivery_address}</p>
+              </div>
+            )}
+
             {selectedOrder.notes && (
               <div style={{ background: 'var(--bg)', borderRadius: '8px', padding: '12px', marginBottom: '12px' }}>
                 <p style={{ color: 'var(--text-3)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', margin: '0 0 4px' }}>Notes</p>
@@ -482,7 +582,6 @@ const Orders = () => {
               </div>
             )}
 
-            {/* Order items */}
             <div style={{ marginBottom: '16px' }}>
               <p style={{ color: 'var(--text-3)', fontSize: '11px', fontWeight: '600', textTransform: 'uppercase', margin: '0 0 8px' }}>Items</p>
               {loadingItems ? (
@@ -495,40 +594,24 @@ const Orders = () => {
               ) : (
                 <div style={{ background: 'var(--bg)', borderRadius: '8px', overflow: 'hidden' }}>
                   {orderItems.map((item, i) => (
-                    <div
-                      key={i}
-                      style={{
-                        display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                        padding: '10px 14px',
-                        borderBottom: i < orderItems.length - 1 ? '1px solid var(--border)' : 'none',
-                      }}
-                    >
+                    <div key={i} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '10px 14px', borderBottom: i < orderItems.length - 1 ? '1px solid var(--border)' : 'none' }}>
                       <div>
                         <div style={{ fontWeight: '600', fontSize: '13px' }}>{item.product_name}</div>
-                        <div style={{ fontSize: '11px', color: 'var(--text-3)' }}>
-                          {item.quantity} × GH₵ {parseFloat(item.unit_price || 0).toFixed(2)}
-                        </div>
+                        <div style={{ fontSize: '11px', color: 'var(--text-3)' }}>{item.quantity} × GH₵ {parseFloat(item.unit_price || 0).toFixed(2)}</div>
                       </div>
-                      <div style={{ fontWeight: '700', color: 'var(--accent, #22c55e)' }}>
+                      <div style={{ fontWeight: '700', color: 'var(--accent)' }}>
                         GH₵ {(item.quantity * parseFloat(item.unit_price || 0)).toFixed(2)}
                       </div>
                     </div>
                   ))}
-                  <div style={{
-                    display: 'flex', justifyContent: 'space-between',
-                    padding: '10px 14px', fontWeight: '800', fontSize: '15px',
-                    borderTop: '2px solid var(--border)',
-                  }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', padding: '12px 14px', fontWeight: '800', fontSize: '15px', borderTop: '2px solid var(--border)' }}>
                     <span>Total</span>
-                    <span style={{ color: 'var(--accent, #22c55e)' }}>
-                      GH₵ {parseFloat(selectedOrder.total_amount || 0).toFixed(2)}
-                    </span>
+                    <span style={{ color: 'var(--accent)' }}>GH₵ {parseFloat(selectedOrder.total_amount || 0).toFixed(2)}</span>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* Actions */}
             <div style={{ display: 'flex', gap: '8px' }}>
               <select
                 className="form-input"
@@ -543,16 +626,14 @@ const Orders = () => {
                 <WhatsAppIcon /> WhatsApp
               </button>
               {isSuperAdmin && (
-                <button className="btn btn-danger" onClick={() => handleDelete(selectedOrder)}>🗑</button>
+                <button className="btn btn-danger" onClick={() => handleDelete(selectedOrder)} disabled={deleting === selectedOrder.id}>🗑</button>
               )}
             </div>
           </div>
         </div>
       )}
 
-      {/* ══════════════════════════════════════════════════════════
-          Create Order Modal
-      ══════════════════════════════════════════════════════════ */}
+      {/* ── Create Order Modal ────────────────────────────────── */}
       {showCreate && (
         <div className="modal-overlay" onClick={() => setShowCreate(false)}>
           <div className="modal" style={{ maxWidth: '580px' }} onClick={e => e.stopPropagation()}>
@@ -561,12 +642,13 @@ const Orders = () => {
               <button className="modal-close" onClick={() => setShowCreate(false)}>✕</button>
             </div>
 
-            {/* Customer */}
+            {/* Customer — FIXED: customers rendered in the visible select */}
             <div className="form-group">
               <label className="form-label">Customer *</label>
               <select
                 className="form-input"
                 value={orderForm.customer_id}
+                style={inputStyle(fe.customer_id)}
                 onChange={e => {
                   const customer = customers.find(c => c.id === parseInt(e.target.value));
                   setOrderForm(f => ({
@@ -574,11 +656,15 @@ const Orders = () => {
                     customer_id:      e.target.value,
                     delivery_address: customer?.address || f.delivery_address,
                   }));
+                  ce('customer_id');
                 }}
               >
                 <option value="">Select customer…</option>
-                {customers.map(c => <option key={c.id} value={c.id}>{c.name} — {c.phone}</option>)}
+                {customers.map(c => (
+                  <option key={c.id} value={c.id}>{c.name} — {c.phone}</option>
+                ))}
               </select>
+              <FormError error={fe.customer_id} />
             </div>
 
             {/* Add products */}
@@ -616,31 +702,68 @@ const Orders = () => {
                   <div key={item.product_id} style={{ display: 'flex', alignItems: 'center', gap: '10px', padding: '8px 0', borderBottom: '1px solid var(--border)' }}>
                     <span style={{ flex: 1, fontWeight: '500', fontSize: '13px' }}>{item.name}</span>
                     <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                      <button
-                        style={{ width: '24px', height: '24px', borderRadius: '50%', border: '1px solid var(--border)', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700' }}
-                        onClick={() => updateItemQty(item.product_id, item.quantity - 1)}
-                      >−</button>
+                      <button style={{ width: '24px', height: '24px', borderRadius: '50%', border: '1px solid var(--border)', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700' }} onClick={() => updateItemQty(item.product_id, item.quantity - 1)}>−</button>
                       <span style={{ fontWeight: '700', minWidth: '24px', textAlign: 'center' }}>{item.quantity}</span>
-                      <button
-                        style={{ width: '24px', height: '24px', borderRadius: '50%', border: '1px solid var(--border)', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700' }}
-                        onClick={() => updateItemQty(item.product_id, item.quantity + 1)}
-                      >+</button>
+                      <button style={{ width: '24px', height: '24px', borderRadius: '50%', border: '1px solid var(--border)', background: 'white', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: '700' }} onClick={() => updateItemQty(item.product_id, item.quantity + 1)}>+</button>
                     </div>
-                    <span style={{ fontWeight: '700', color: 'var(--accent, #22c55e)', minWidth: '80px', textAlign: 'right' }}>
+                    <span style={{ fontWeight: '700', color: 'var(--accent)', minWidth: '80px', textAlign: 'right' }}>
                       GH₵ {(item.unit_price * item.quantity).toFixed(2)}
                     </span>
-                    <button
-                      style={{ background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: '16px' }}
-                      onClick={() => removeItem(item.product_id)}
-                    >✕</button>
+                    <button style={{ background: 'none', border: 'none', color: 'var(--text-3)', cursor: 'pointer', fontSize: '16px' }} onClick={() => removeItem(item.product_id)}>✕</button>
                   </div>
                 ))}
-                <div style={{ display: 'flex', justifyContent: 'space-between', paddingTop: '10px', fontWeight: '800', fontSize: '15px' }}>
-                  <span>Total</span>
-                  <span style={{ color: 'var(--accent, #22c55e)' }}>GH₵ {orderTotal.toFixed(2)}</span>
+                <div style={{ borderTop: '1px solid var(--border)', marginTop: '6px', paddingTop: '10px' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'var(--text-2)', marginBottom: '4px' }}>
+                    <span>Subtotal</span>
+                    <span>GH₵ {orderTotal.toFixed(2)}</span>
+                  </div>
+                  {selectedZone && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'var(--text-2)', marginBottom: '4px' }}>
+                      <span>Delivery ({selectedZone.name}){qualifiesForFreeDelivery && ' — Free!'}</span>
+                      <span>GH₵ {estimatedFee.toFixed(2)}{!qualifiesForFreeDelivery && '*'}</span>
+                    </div>
+                  )}
+                  {manualDiscountValue > 0 && (
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: '#16a34a', marginBottom: '4px' }}>
+                      <span>Discount</span>
+                      <span>− GH₵ {manualDiscountValue.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: '800', fontSize: '15px', marginTop: '4px' }}>
+                    <span>Estimated Total</span>
+                    <span style={{ color: 'var(--accent)' }}>GH₵ {estimatedTotal.toFixed(2)}</span>
+                  </div>
+                  {selectedZone && !qualifiesForFreeDelivery && (
+                    <p style={{ fontSize: '11px', color: 'var(--text-3)', margin: '4px 0 0' }}>
+                      *Final delivery fee may include a time-based surcharge, calculated when the order is created.
+                    </p>
+                  )}
                 </div>
               </div>
             )}
+
+            {/* Delivery zone */}
+            <div className="form-group">
+              <label className="form-label">Delivery Zone</label>
+              <select
+                className="form-input"
+                value={orderForm.delivery_zone_id}
+                onChange={e => setOrderForm(f => ({ ...f, delivery_zone_id: e.target.value }))}
+              >
+                <option value="">No zone selected</option>
+                {zones.map(z => (
+                  <option key={z.id} value={z.id}>
+                    {z.name} — GH₵{parseFloat(z.fee).toFixed(2)}
+                  </option>
+                ))}
+              </select>
+              {belowZoneMinimum && (
+                <p style={{ color: '#ef4444', fontSize: '12px', margin: '4px 0 0' }}>
+                  {selectedZone.name} requires a minimum order of GH₵{parseFloat(selectedZone.min_order_amount).toFixed(2)}.
+                  Add more items or choose a different zone.
+                </p>
+              )}
+            </div>
 
             {/* Payment method */}
             <div className="form-group">
@@ -656,7 +779,7 @@ const Orders = () => {
               </select>
             </div>
 
-            {/* MoMo reference — only show when momo selected */}
+            {/* MoMo reference */}
             {orderForm.payment_method === 'momo' && (
               <div className="form-group">
                 <label className="form-label">
@@ -668,18 +791,16 @@ const Orders = () => {
                   value={orderForm.momo_reference}
                   onChange={e => setOrderForm(f => ({ ...f, momo_reference: e.target.value }))}
                   placeholder="e.g. MP240601123456"
-                  style={{ fontFamily: 'monospace' }}
+                  style={{ fontFamily: 'var(--font-mono)' }}
                 />
-                <p style={{ color: 'var(--text-3)', fontSize: '12px', margin: '4px 0 0' }}>
-                  Found in the MoMo confirmation SMS
-                </p>
+                <p className="form-hint">Found in the MoMo confirmation SMS</p>
               </div>
             )}
 
             {/* COD info */}
-            {orderForm.payment_method === 'cod' && (
+            {(orderForm.payment_method === 'cod' || orderForm.payment_method === 'cash') && (
               <div className="alert alert-info" style={{ marginBottom: '16px' }}>
-                💵 Rider will collect cash at the door. You can confirm and generate a receipt from the Payments page after delivery.
+                💵 Rider will collect cash at the door. Confirm and generate a receipt from the Payments page after delivery.
               </div>
             )}
 
@@ -689,9 +810,48 @@ const Orders = () => {
               <input
                 className="form-input"
                 value={orderForm.delivery_address}
-                onChange={e => setOrderForm(f => ({ ...f, delivery_address: e.target.value }))}
+                style={inputStyle(fe.delivery_address)}
+                onChange={e => { setOrderForm(f => ({ ...f, delivery_address: e.target.value })); ce('delivery_address'); }}
                 placeholder="e.g. Accra, East Legon"
               />
+              <FormError error={fe.delivery_address} />
+            </div>
+
+            {/* Discount */}
+            <div className="form-group">
+              <label className="form-label">
+                Discount (optional)
+                {pricingSettings && (
+                  <span style={{ color: 'var(--text-3)', fontWeight: '400', marginLeft: '4px' }}>
+                    — max {pricingSettings.max_manual_discount_type === 'percent'
+                      ? `${pricingSettings.max_manual_discount}%`
+                      : `GH₵${pricingSettings.max_manual_discount}`}
+                  </span>
+                )}
+              </label>
+              <input
+                className="form-input"
+                type="number"
+                step="0.01"
+                value={orderForm.manual_discount}
+                onChange={e => setOrderForm(f => ({ ...f, manual_discount: e.target.value }))}
+                placeholder="0.00"
+                style={{ borderColor: discountExceedsCap ? '#ef4444' : undefined }}
+              />
+              {discountExceedsCap && (
+                <p style={{ color: '#ef4444', fontSize: '12px', margin: '4px 0 0' }}>
+                  Exceeds the maximum allowed discount (GH₵{maxDiscountCap.toFixed(2)}). Ask a super admin for a larger discount.
+                </p>
+              )}
+              {manualDiscountValue > 0 && !discountExceedsCap && (
+                <input
+                  className="form-input"
+                  style={{ marginTop: '8px' }}
+                  value={orderForm.discount_reason}
+                  onChange={e => setOrderForm(f => ({ ...f, discount_reason: e.target.value }))}
+                  placeholder="Reason for discount (optional, shown in audit log)"
+                />
+              )}
             </div>
 
             {/* Notes */}
@@ -708,8 +868,13 @@ const Orders = () => {
 
             <div style={{ display: 'flex', gap: '10px' }}>
               <button className="btn btn-secondary" style={{ flex: 1 }} onClick={() => setShowCreate(false)}>Cancel</button>
-              <button className="btn btn-primary" style={{ flex: 1 }} onClick={handleCreateOrder} disabled={saving}>
-                {saving ? 'Creating…' : `Create Order — GH₵ ${orderTotal.toFixed(2)}`}
+              <button
+                className="btn btn-primary"
+                style={{ flex: 1 }}
+                onClick={handleCreateOrder}
+                disabled={saving || belowZoneMinimum || discountExceedsCap}
+              >
+                {saving ? 'Creating…' : `Create Order — GH₵ ${estimatedTotal.toFixed(2)}`}
               </button>
             </div>
           </div>

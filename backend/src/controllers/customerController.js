@@ -120,4 +120,62 @@ const deleteCustomer = async (req, res) => {
   }
 };
 
-module.exports = { getCustomers, getCustomer, createCustomer, updateCustomer, deleteCustomer };
+
+
+const getCustomerProfile = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const customer = await pool.query('SELECT * FROM customers WHERE id = $1', [id]);
+    if (!customer.rows.length) return res.status(404).json({ success: false, message: 'Customer not found' });
+
+    const orders = await pool.query(
+      `SELECT o.*, r.name as rider_name
+       FROM orders o
+       LEFT JOIN deliveries d ON o.id = d.order_id
+       LEFT JOIN riders r ON d.rider_id = r.id
+       WHERE o.customer_id = $1
+       ORDER BY o.created_at DESC`,
+      [id]
+    );
+
+    const stats = await pool.query(
+      `SELECT
+        COUNT(*) as total_orders,
+        COUNT(CASE WHEN status = 'delivered' THEN 1 END) as delivered,
+        COUNT(CASE WHEN status = 'failed' THEN 1 END) as failed,
+        COUNT(CASE WHEN status = 'pending' THEN 1 END) as pending,
+        COALESCE(SUM(CASE WHEN status = 'delivered' THEN total_amount ELSE 0 END), 0) as total_spend,
+        COALESCE(AVG(CASE WHEN status = 'delivered' THEN total_amount END), 0) as avg_order_value,
+        MAX(created_at) as last_order_date
+       FROM orders WHERE customer_id = $1`,
+      [id]
+    );
+
+    res.json({
+      success: true,
+      customer: customer.rows[0],
+      orders: orders.rows,
+      stats: stats.rows[0],
+    });
+  } catch (error) {
+    console.error('getCustomerProfile error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+const updateCustomerNotes = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { notes } = req.body;
+    const result = await pool.query(
+      'UPDATE customers SET notes=$1, updated_at=NOW() WHERE id=$2 RETURNING *',
+      [notes, id]
+    );
+    if (!result.rows.length) return res.status(404).json({ success: false, message: 'Customer not found' });
+    res.json({ success: true, customer: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+module.exports = { getCustomers, getCustomer, createCustomer, updateCustomer, deleteCustomer, getCustomerProfile, updateCustomerNotes };

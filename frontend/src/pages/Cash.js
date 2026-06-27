@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { cashAPI, ridersAPI } from '../utils/api';
+import { useFormValidation, FormError, inputStyle, rules } from '../utils/useFormValidation';
 
 /* ─── CSV helper ──────────────────────────────────────────────── */
 const downloadCSV = (rows, filename) => {
@@ -31,6 +32,13 @@ const Cash = () => {
   const [saving, setSaving]       = useState(false);
   const [activeTab, setActiveTab] = useState('logs');
   const [form, setForm]           = useState({ rider_id: '', amount: '', notes: '' });
+
+  /* ── Validation ───────────────────────────────────────────────── */
+  const cashSchema = {
+    rider_id: [rules.required('Rider')],
+    amount:   [rules.required('Amount'), rules.min(0.01, 'Amount')],
+  };
+  const { errors: fe, validateAll: va, clearError: ce, clearAll: ca } = useFormValidation(cashSchema);
 
   /* ── Filters (Cash Logs tab) ─────────────────────────────────── */
   const [filterDate,  setFilterDate]  = useState('');
@@ -101,7 +109,7 @@ const Cash = () => {
   };
 
   const handleSave = async () => {
-    if (!form.rider_id || !form.amount) return alert('Rider and amount are required');
+    if (!va(form)) return;
     try {
       setSaving(true);
       await cashAPI.create(form);
@@ -159,7 +167,7 @@ const Cash = () => {
           <h1 className="page-title">Cash Control</h1>
           <p className="page-subtitle">Track and verify rider cash collections</p>
         </div>
-        <button className="btn btn-primary" onClick={() => setShowModal(true)}>+ Log Cash</button>
+        <button className="btn btn-primary" onClick={() => { ca(); setShowModal(true); }}>+ Log Cash</button>
       </div>
 
       {/* Summary cards */}
@@ -525,10 +533,11 @@ const Cash = () => {
             </div>
             <div className="form-group">
               <label className="form-label">Rider *</label>
-              <select className="form-input" value={form.rider_id} onChange={e => setForm(f => ({ ...f, rider_id: e.target.value }))}>
+              <select className="form-input" value={form.rider_id} style={inputStyle(fe.rider_id)} onChange={e => { setForm(f => ({ ...f, rider_id: e.target.value })); ce('rider_id'); }}>
                 <option value="">Select rider…</option>
                 {riders.map(r => <option key={r.id} value={r.id}>{r.name} — {r.phone}</option>)}
               </select>
+              <FormError error={fe.rider_id} />
             </div>
             <div className="form-group">
               <label className="form-label">Amount Collected (GH₵) *</label>
@@ -536,9 +545,11 @@ const Cash = () => {
                 className="form-input"
                 type="number" min="0" step="0.01"
                 value={form.amount}
-                onChange={e => setForm(f => ({ ...f, amount: e.target.value }))}
+                style={inputStyle(fe.amount)}
+                onChange={e => { setForm(f => ({ ...f, amount: e.target.value })); ce('amount'); }}
                 placeholder="0.00"
               />
+              <FormError error={fe.amount} />
             </div>
             <div className="form-group">
               <label className="form-label">Notes</label>

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { customersAPI, productsAPI, ridersAPI, ordersAPI } from '../utils/api';
+import { customersAPI, productsAPI, ridersAPI, ordersAPI, deliveryZonesAPI, pricingSettingsAPI } from '../utils/api';
 import './Billing.css';
 
 // Ghana phone validation
@@ -44,18 +44,32 @@ const Billing = () => {
   const [showCashConfirm, setShowCashConfirm] = useState(false);
   const [customerSearch, setCustomerSearch] = useState('');
 
+  /* ── Delivery zone + discount state — large orders are exactly
+     where zone fees and discounts matter most, so this lives in
+     the Billing flow (the primary order-creation path), not just
+     the simpler Orders.js modal. ── */
+  const [zones, setZones] = useState([]);
+  const [pricingSettings, setPricingSettings] = useState(null);
+  const [deliveryZoneId, setDeliveryZoneId] = useState('');
+  const [manualDiscount, setManualDiscount] = useState('');
+  const [discountReason, setDiscountReason] = useState('');
+
   useEffect(() => { fetchAll(); }, []);
 
   const fetchAll = async () => {
     try {
-      const [c, p, r] = await Promise.all([
+      const [c, p, r, z, ps] = await Promise.all([
         customersAPI.getAll({ limit: 200 }),
         productsAPI.getAll({ limit: 200 }),
         ridersAPI.getAll(),
+        deliveryZonesAPI.getAll(),
+        pricingSettingsAPI.get(),
       ]);
       setCustomers(c.data.customers || []);
       setProducts((p.data.products || []).filter(p => p.is_active && p.stock_quantity > 0));
       setRiders(r.data.riders || []);
+      setZones((z.data.zones || []).filter(zone => zone.is_active));
+      setPricingSettings(ps.data.settings || null);
     } catch (err) {
       console.error(err);
     } finally {
@@ -91,6 +105,31 @@ const Billing = () => {
   const getTotal = () => orderItems.reduce((sum, item) =>
     sum + (parseFloat(item.unit_price) || 0) * (parseInt(item.quantity) || 0), 0
   );
+
+  /* ── Delivery/discount preview calculations — ESTIMATES only.
+     The real fee (including any time-based surcharge) and the real
+     discount are always recalculated server-side in createOrder.
+     We don't duplicate the surcharge logic here on purpose, since
+     keeping two copies of that rule in sync is a real source of
+     bugs — the backend stays the single source of truth. ── */
+  const selectedZone = zones.find(z => z.id === parseInt(deliveryZoneId)) || null;
+  const orderSubtotal = getTotal();
+  const freeDeliveryThreshold = pricingSettings?.free_delivery_threshold;
+  const qualifiesForFreeDelivery = freeDeliveryThreshold != null && orderSubtotal >= parseFloat(freeDeliveryThreshold);
+  const estimatedDeliveryFee = selectedZone
+    ? (qualifiesForFreeDelivery ? 0 : parseFloat(selectedZone.fee))
+    : 0;
+  const belowZoneMinimum = selectedZone?.min_order_amount > 0 && orderSubtotal < parseFloat(selectedZone.min_order_amount);
+
+  const maxDiscountCap = pricingSettings
+    ? (pricingSettings.max_manual_discount_type === 'percent'
+        ? orderSubtotal * (parseFloat(pricingSettings.max_manual_discount) / 100)
+        : parseFloat(pricingSettings.max_manual_discount))
+    : 0;
+  const manualDiscountValue = parseFloat(manualDiscount) || 0;
+  const discountExceedsCap = manualDiscountValue > maxDiscountCap;
+
+  const estimatedGrandTotal = Math.max(0, orderSubtotal + estimatedDeliveryFee - manualDiscountValue);
 
   // ── Validations ──
   const validateStep1 = () => {
@@ -173,6 +212,12 @@ const Billing = () => {
     if (!notes.trim()) {
       errs.notes = 'Please add delivery notes or instructions';
     }
+    if (belowZoneMinimum) {
+      errs.delivery_zone = `${selectedZone.name} requires a minimum order of GHS ${parseFloat(selectedZone.min_order_amount).toFixed(2)}`;
+    }
+    if (discountExceedsCap) {
+      errs.discount = `Discount exceeds the maximum allowed (GHS ${maxDiscountCap.toFixed(2)})`;
+    }
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -233,6 +278,8 @@ const Billing = () => {
         delivery_address: deliveryAddress,
         notes: notes || '',
         ...(paymentMethod === 'momo' && momoReference ? { momo_reference: momoReference } : {}),
+        ...(deliveryZoneId ? { delivery_zone_id: parseInt(deliveryZoneId) } : {}),
+        ...(manualDiscountValue > 0 ? { manual_discount: manualDiscountValue, discount_reason: discountReason || undefined } : {}),
       };
 
       const orderRes = await ordersAPI.create(orderPayload);
@@ -457,11 +504,29 @@ const Billing = () => {
           ))}
 
           <div className="billing-total-bar">
-            <span>Total</span>
+            <span>Items Subtotal</span>
             <strong style={{ fontSize: '1.25rem', color: '#22c55e' }}>{formatCurrency(getTotal())}</strong>
           </div>
 
+          {/* ── Delivery Zone ── */}
           <div className="form-group" style={{ marginTop: '1rem' }}>
+            <label className="form-label">Delivery Zone <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>(optional)</span></label>
+            <select
+              className={'form-input' + (errors.delivery_zone ? ' input-error' : '')}
+              value={deliveryZoneId}
+              onChange={e => setDeliveryZoneId(e.target.value)}
+            >
+              <option value="">No zone selected</option>
+              {zones.map(z => (
+                <option key={z.id} value={z.id}>
+                  {z.name} — GHS {parseFloat(z.fee).toFixed(2)}
+                </option>
+              ))}
+            </select>
+            {errors.delivery_zone && <div className="field-error">{errors.delivery_zone}</div>}
+          </div>
+
+          <div className="form-group">
             <label className="form-label">Delivery Address *</label>
             <input
               className={'form-input' + (errors.address ? ' input-error' : '')}
@@ -471,6 +536,70 @@ const Billing = () => {
             />
             {errors.address && <div className="field-error">{errors.address}</div>}
           </div>
+
+          {/* ── Discount ── */}
+          <div className="form-group">
+            <label className="form-label">
+              Discount <span style={{ color: 'var(--text-3)', fontWeight: 400 }}>(optional)</span>
+              {pricingSettings && (
+                <span style={{ color: 'var(--text-3)', fontWeight: 400, marginLeft: '4px' }}>
+                  — max {pricingSettings.max_manual_discount_type === 'percent'
+                    ? `${pricingSettings.max_manual_discount}%`
+                    : `GHS ${pricingSettings.max_manual_discount}`}
+                </span>
+              )}
+            </label>
+            <input
+              className={'form-input' + (errors.discount ? ' input-error' : '')}
+              type="number"
+              step="0.01"
+              min="0"
+              value={manualDiscount}
+              onChange={e => setManualDiscount(e.target.value)}
+              placeholder="0.00"
+            />
+            {errors.discount && <div className="field-error">{errors.discount}</div>}
+            {manualDiscountValue > 0 && !discountExceedsCap && (
+              <input
+                className="form-input"
+                style={{ marginTop: '0.5rem' }}
+                value={discountReason}
+                onChange={e => setDiscountReason(e.target.value)}
+                placeholder="Reason for discount (optional, shown in audit log)"
+              />
+            )}
+          </div>
+
+          {/* ── Live order summary including zone fee + discount ── */}
+          {(selectedZone || manualDiscountValue > 0) && (
+            <div style={{ background: 'var(--bg)', borderRadius: '8px', padding: '0.85rem 1rem', marginBottom: '1rem' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-2)', marginBottom: '4px' }}>
+                <span>Items Subtotal</span>
+                <span>{formatCurrency(orderSubtotal)}</span>
+              </div>
+              {selectedZone && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: 'var(--text-2)', marginBottom: '4px' }}>
+                  <span>Delivery ({selectedZone.name}){qualifiesForFreeDelivery && ' — Free!'}</span>
+                  <span>{formatCurrency(estimatedDeliveryFee)}{!qualifiesForFreeDelivery && '*'}</span>
+                </div>
+              )}
+              {manualDiscountValue > 0 && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', color: '#16a34a', marginBottom: '4px' }}>
+                  <span>Discount</span>
+                  <span>− {formatCurrency(manualDiscountValue)}</span>
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: '1.05rem', marginTop: '4px' }}>
+                <span>Estimated Total</span>
+                <span style={{ color: 'var(--accent)' }}>{formatCurrency(estimatedGrandTotal)}</span>
+              </div>
+              {selectedZone && !qualifiesForFreeDelivery && (
+                <p style={{ fontSize: '0.72rem', color: 'var(--text-3)', margin: '4px 0 0' }}>
+                  *Final delivery fee may include a time-based surcharge, calculated when the order is created.
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="form-group">
             <label className="form-label">Assign Rider *</label>
@@ -540,7 +669,7 @@ const Billing = () => {
                 <strong>MTN MoMo Payment Instructions:</strong><br />
                 Dial <strong>*170#</strong> → Send Money → Enter number: <strong>0XX XXX XXXX</strong><br />
                 Account Name: <strong>Shore Winds</strong><br />
-                Amount: <strong>{formatCurrency(getTotal())}</strong>
+                Amount: <strong>{formatCurrency(estimatedGrandTotal)}</strong>
               </div>
               <div className="form-group" style={{ margin: 0 }}>
                 <label className="form-label">MoMo Reference Number *</label>
@@ -558,13 +687,13 @@ const Billing = () => {
 
           {paymentMethod === 'paid_on_delivery' && (
             <div className="alert alert-warning" style={{ marginTop: '1rem' }}>
-              <strong>Pay on Delivery selected.</strong> Rider will collect <strong>{formatCurrency(getTotal())}</strong> upon delivery.
+              <strong>Pay on Delivery selected.</strong> Rider will collect <strong>{formatCurrency(estimatedGrandTotal)}</strong> upon delivery.
             </div>
           )}
 
           <div className="billing-total-bar" style={{ marginTop: '1.5rem' }}>
-            <span>Amount</span>
-            <strong style={{ fontSize: '1.4rem', color: '#22c55e' }}>{formatCurrency(getTotal())}</strong>
+            <span>Amount{(selectedZone || manualDiscountValue > 0) && ' (estimated)'}</span>
+            <strong style={{ fontSize: '1.4rem', color: '#22c55e' }}>{formatCurrency(estimatedGrandTotal)}</strong>
           </div>
 
           <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: '1.5rem' }}>
@@ -599,6 +728,9 @@ const Billing = () => {
             <div className="billing-review-block">
               <div className="billing-review-label">Delivery Address</div>
               <div className="billing-review-value">{deliveryAddress}</div>
+              {selectedZone && (
+                <div style={{ color: 'var(--text-2)', fontSize: '0.85rem' }}>Zone: {selectedZone.name}</div>
+              )}
             </div>
             <div className="billing-review-block">
               <div className="billing-review-label">Payment</div>
@@ -643,10 +775,34 @@ const Billing = () => {
             </table>
           </div>
 
-          <div className="billing-total-bar">
-            <span>Total Amount</span>
-            <strong style={{ fontSize: '1.4rem', color: '#22c55e' }}>{formatCurrency(getTotal())}</strong>
+          <div style={{ marginTop: '1rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: 'var(--text-2)', marginBottom: '4px' }}>
+              <span>Items Subtotal</span>
+              <span>{formatCurrency(orderSubtotal)}</span>
+            </div>
+            {selectedZone && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: 'var(--text-2)', marginBottom: '4px' }}>
+                <span>Delivery ({selectedZone.name}){qualifiesForFreeDelivery && ' — Free!'}</span>
+                <span>{formatCurrency(estimatedDeliveryFee)}{!qualifiesForFreeDelivery && '*'}</span>
+              </div>
+            )}
+            {manualDiscountValue > 0 && (
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.9rem', color: '#16a34a', marginBottom: '4px' }}>
+                <span>Discount{discountReason && ` (${discountReason})`}</span>
+                <span>− {formatCurrency(manualDiscountValue)}</span>
+              </div>
+            )}
           </div>
+
+          <div className="billing-total-bar">
+            <span>Total Amount{(selectedZone || manualDiscountValue > 0) && ' (estimated)'}</span>
+            <strong style={{ fontSize: '1.4rem', color: '#22c55e' }}>{formatCurrency(estimatedGrandTotal)}</strong>
+          </div>
+          {selectedZone && !qualifiesForFreeDelivery && (
+            <p style={{ fontSize: '0.75rem', color: 'var(--text-3)', margin: '4px 0 0', textAlign: 'right' }}>
+              *Final delivery fee may include a time-based surcharge, calculated when the order is created.
+            </p>
+          )}
 
           {notes && (
             <div className="alert alert-info" style={{ marginTop: '1rem' }}>
@@ -674,10 +830,10 @@ const Billing = () => {
               <div style={{ fontSize: '3rem', marginBottom: '1rem' }}>💵</div>
               <div style={{ fontSize: '1rem', color: 'var(--text-2)', marginBottom: '0.5rem' }}>Amount to collect</div>
               <div style={{ fontSize: '2rem', fontWeight: 800, color: 'var(--accent)', marginBottom: '1.5rem' }}>
-                GHS {parseFloat(getTotal()).toFixed(2)}
+                {formatCurrency(estimatedGrandTotal)}
               </div>
               <div className="alert alert-warning" style={{ textAlign: 'left', marginBottom: '1.5rem' }}>
-                <strong>Please confirm:</strong> Has the customer paid <strong>GHS {parseFloat(getTotal()).toFixed(2)}</strong> in cash?
+                <strong>Please confirm:</strong> Has the customer paid <strong>{formatCurrency(estimatedGrandTotal)}</strong> in cash?
               </div>
               <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center' }}>
                 <button className="btn btn-secondary" onClick={() => setShowCashConfirm(false)}>

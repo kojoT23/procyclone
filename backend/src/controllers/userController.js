@@ -3,7 +3,6 @@ const { body } = require('express-validator');
 const pool = require('../config/db');
 const { ROLES } = require('../config/roles');
 
-/* ─── Validation ──────────────────────────────────────────────── */
 const createUserValidation = [
   body('name').notEmpty().withMessage('Name is required'),
   body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
@@ -20,7 +19,6 @@ const updateUserValidation = [
   body('role').optional().isIn(Object.keys(ROLES)).withMessage('Invalid role'),
 ];
 
-/* ─── GET all users ───────────────────────────────────────────── */
 const getUsers = async (req, res) => {
   try {
     const { role, search, page = 1, limit = 20 } = req.query;
@@ -29,7 +27,7 @@ const getUsers = async (req, res) => {
     const values = [];
     let i = 1;
 
-    if (role)   { conditions.push(`role = $${i++}`); values.push(role); }
+    if (role) { conditions.push(`role = $${i++}`); values.push(role); }
     if (search) {
       conditions.push(`(name ILIKE $${i} OR email ILIKE $${i} OR phone ILIKE $${i})`);
       values.push(`%${search}%`); i++;
@@ -38,21 +36,18 @@ const getUsers = async (req, res) => {
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
     const countResult = await pool.query(`SELECT COUNT(*) FROM users ${where}`, values);
     const result = await pool.query(
-      `SELECT id, name, email, role, phone, is_active, last_login, created_at,
-              date_of_birth, gender, address, ghana_card_number,
-              emergency_name, emergency_phone, emergency_relation,
-              start_date, passport_photo, notes
+      `SELECT id, name, email, role, phone, is_active, last_login, created_at
        FROM users ${where} ORDER BY created_at DESC LIMIT $${i} OFFSET $${i + 1}`,
       [...values, limit, offset]
     );
 
     res.json({
       success: true,
-      count:  result.rows.length,
-      total:  parseInt(countResult.rows[0].count),
-      page:   parseInt(page),
-      pages:  Math.ceil(parseInt(countResult.rows[0].count) / limit),
-      users:  result.rows,
+      count: result.rows.length,
+      total: parseInt(countResult.rows[0].count),
+      page: parseInt(page),
+      pages: Math.ceil(parseInt(countResult.rows[0].count) / limit),
+      users: result.rows,
     });
   } catch (error) {
     console.error('getUsers error:', error);
@@ -60,16 +55,11 @@ const getUsers = async (req, res) => {
   }
 };
 
-/* ─── GET one user ────────────────────────────────────────────── */
 const getUser = async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
-      `SELECT id, name, email, role, phone, is_active, last_login, created_at,
-              date_of_birth, gender, address, ghana_card_number,
-              emergency_name, emergency_phone, emergency_relation,
-              start_date, passport_photo, notes
-       FROM users WHERE id = $1`,
+      'SELECT id, name, email, role, phone, is_active, last_login, created_at FROM users WHERE id = $1',
       [id]
     );
     if (result.rows.length === 0) {
@@ -81,15 +71,9 @@ const getUser = async (req, res) => {
   }
 };
 
-/* ─── CREATE user ─────────────────────────────────────────────── */
 const createUser = async (req, res) => {
   try {
-    const {
-      name, email, password, role, phone,
-      date_of_birth, gender, address, ghana_card_number,
-      emergency_name, emergency_phone, emergency_relation,
-      start_date, passport_photo, notes,
-    } = req.body;
+    const { name, email, password, role, phone } = req.body;
 
     const existing = await pool.query('SELECT id FROM users WHERE email = $1', [email]);
     if (existing.rows.length > 0) {
@@ -104,23 +88,19 @@ const createUser = async (req, res) => {
     const hashedPassword = await bcrypt.hash(password, salt);
 
     const result = await pool.query(
-      `INSERT INTO users (
-        name, email, password, role, phone,
-        date_of_birth, gender, address, ghana_card_number,
-        emergency_name, emergency_phone, emergency_relation,
-        start_date, passport_photo, notes
-      ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-      RETURNING id, name, email, role, phone, is_active, created_at,
-                date_of_birth, gender, address, ghana_card_number,
-                emergency_name, emergency_phone, emergency_relation,
-                start_date, passport_photo, notes`,
-      [
-        name, email, hashedPassword, role, phone,
-        date_of_birth || null, gender || null, address || null, ghana_card_number || null,
-        emergency_name || null, emergency_phone || null, emergency_relation || null,
-        start_date || null, passport_photo || null, notes || null,
-      ]
+      `INSERT INTO users (name, email, password, role, phone)
+       VALUES ($1, $2, $3, $4, $5)
+       RETURNING id, name, email, role, phone, is_active, created_at`,
+      [name, email, hashedPassword, role, phone]
     );
+
+    // Auto-create rider profile if role is rider
+    if (role === 'rider') {
+      await pool.query(
+        'INSERT INTO riders (name, phone, user_id) VALUES ($1, $2, $3)',
+        [name, phone || '000-' + result.rows[0].id, result.rows[0].id]
+      );
+    }
 
     res.status(201).json({
       success: true,
@@ -133,18 +113,11 @@ const createUser = async (req, res) => {
   }
 };
 
-/* ─── UPDATE user ─────────────────────────────────────────────── */
 const updateUser = async (req, res) => {
   try {
     const { id } = req.params;
-    const {
-      name, email, role, phone,
-      date_of_birth, gender, address, ghana_card_number,
-      emergency_name, emergency_phone, emergency_relation,
-      start_date, passport_photo, notes,
-    } = req.body;
+    const { name, email, role, phone } = req.body;
 
-    // Protect last super admin from demotion
     if (role && role !== 'super_admin') {
       const superAdmins = await pool.query(
         "SELECT COUNT(*) FROM users WHERE role = 'super_admin' AND is_active = true"
@@ -157,47 +130,26 @@ const updateUser = async (req, res) => {
 
     const result = await pool.query(
       `UPDATE users SET
-        name               = COALESCE($1,  name),
-        email              = COALESCE($2,  email),
-        role               = COALESCE($3,  role),
-        phone              = COALESCE($4,  phone),
-        date_of_birth      = COALESCE($5,  date_of_birth),
-        gender             = COALESCE($6,  gender),
-        address            = COALESCE($7,  address),
-        ghana_card_number  = COALESCE($8,  ghana_card_number),
-        emergency_name     = COALESCE($9,  emergency_name),
-        emergency_phone    = COALESCE($10, emergency_phone),
-        emergency_relation = COALESCE($11, emergency_relation),
-        start_date         = COALESCE($12, start_date),
-        passport_photo     = COALESCE($13, passport_photo),
-        notes              = COALESCE($14, notes),
-        updated_at         = NOW()
-       WHERE id = $15
-       RETURNING id, name, email, role, phone, is_active, updated_at,
-                 date_of_birth, gender, address, ghana_card_number,
-                 emergency_name, emergency_phone, emergency_relation,
-                 start_date, passport_photo, notes`,
-      [
-        name, email, role, phone,
-        date_of_birth || null, gender || null, address || null, ghana_card_number || null,
-        emergency_name || null, emergency_phone || null, emergency_relation || null,
-        start_date || null, passport_photo || null, notes || null,
-        id,
-      ]
+        name = COALESCE($1, name),
+        email = COALESCE($2, email),
+        role = COALESCE($3, role),
+        phone = COALESCE($4, phone),
+        updated_at = NOW()
+       WHERE id = $5
+       RETURNING id, name, email, role, phone, is_active, updated_at`,
+      [name, email, role, phone, id]
     );
 
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'User not found' });
     }
 
-    res.json({ success: true, message: 'Staff profile updated', user: result.rows[0] });
+    res.json({ success: true, message: 'User updated', user: result.rows[0] });
   } catch (error) {
-    console.error('updateUser error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
 
-/* ─── TOGGLE active status ────────────────────────────────────── */
 const toggleUserStatus = async (req, res) => {
   try {
     const { id } = req.params;
@@ -228,7 +180,7 @@ const toggleUserStatus = async (req, res) => {
 
     res.json({
       success: true,
-      message: `${result.rows[0].name} ${newStatus ? 'activated' : 'deactivated'}`,
+      message: `User ${newStatus ? 'activated' : 'deactivated'} successfully`,
       user: result.rows[0],
     });
   } catch (error) {
@@ -236,46 +188,11 @@ const toggleUserStatus = async (req, res) => {
   }
 };
 
-/* ─── DELETE user — super_admin only ──────────────────────────── */
-const deleteUser = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    // Cannot delete yourself
-    if (parseInt(id) === req.user.id) {
-      return res.status(400).json({ success: false, message: 'You cannot delete your own account' });
-    }
-
-    const current = await pool.query('SELECT name, role FROM users WHERE id = $1', [id]);
-    if (current.rows.length === 0) {
-      return res.status(404).json({ success: false, message: 'User not found' });
-    }
-
-    // Protect last super admin
-    if (current.rows[0].role === 'super_admin') {
-      const superAdmins = await pool.query(
-        "SELECT COUNT(*) FROM users WHERE role = 'super_admin'"
-      );
-      if (parseInt(superAdmins.rows[0].count) <= 1) {
-        return res.status(400).json({ success: false, message: 'Cannot delete the only super admin' });
-      }
-    }
-
-    await pool.query('DELETE FROM users WHERE id = $1', [id]);
-
-    res.json({ success: true, message: `${current.rows[0].name} has been deleted` });
-  } catch (error) {
-    console.error('deleteUser error:', error);
-    res.status(500).json({ success: false, message: 'Server error' });
-  }
-};
-
-/* ─── GET roles list ──────────────────────────────────────────── */
 const getRoles = async (req, res) => {
   try {
     const roles = Object.entries(ROLES).map(([key, value]) => ({
       key,
-      label:       value.label,
+      label: value.label,
       description: value.description,
       permissions: value.permissions,
     }));
@@ -285,14 +202,168 @@ const getRoles = async (req, res) => {
   }
 };
 
+/* ─── DELETE user — super_admin only ──────────────────────────── */
+const deleteUser = async (req, res) => {
+  try {
+    const { id } = req.params;
+    if (parseInt(id) === req.user.id) {
+      return res.status(400).json({ success: false, message: 'You cannot delete your own account' });
+    }
+    const current = await pool.query('SELECT name, role FROM users WHERE id = $1', [id]);
+    if (current.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'User not found' });
+    }
+    if (current.rows[0].role === 'super_admin') {
+      const count = await pool.query("SELECT COUNT(*) FROM users WHERE role = 'super_admin'");
+      if (parseInt(count.rows[0].count) <= 1) {
+        return res.status(400).json({ success: false, message: 'Cannot delete the only super admin' });
+      }
+    }
+    await pool.query('DELETE FROM users WHERE id = $1', [id]);
+    res.json({ success: true, message: `${current.rows[0].name} has been deleted` });
+  } catch (error) {
+    console.error('deleteUser error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+/* ─── GET own profile ─────────────────────────────────────────── */
+const getProfile = async (req, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, name, email, role, phone, is_active, last_login, created_at,
+              date_of_birth, gender, address, ghana_card_number,
+              emergency_name, emergency_phone, emergency_relation,
+              start_date, passport_photo, notes
+       FROM users WHERE id = $1`,
+      [req.user.id]
+    );
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Profile not found' });
+    }
+    res.json({ success: true, user: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+/* ─── UPDATE own profile ──────────────────────────────────────── */
+const updateProfile = async (req, res) => {
+  try {
+    const {
+      name, phone, date_of_birth, gender, address,
+      ghana_card_number, emergency_name, emergency_phone,
+      emergency_relation, passport_photo, notes,
+    } = req.body;
+
+    const result = await pool.query(
+      `UPDATE users SET
+        name               = COALESCE($1,  name),
+        phone              = COALESCE($2,  phone),
+        date_of_birth      = COALESCE($3,  date_of_birth),
+        gender             = COALESCE($4,  gender),
+        address            = COALESCE($5,  address),
+        ghana_card_number  = COALESCE($6,  ghana_card_number),
+        emergency_name     = COALESCE($7,  emergency_name),
+        emergency_phone    = COALESCE($8,  emergency_phone),
+        emergency_relation = COALESCE($9,  emergency_relation),
+        passport_photo     = COALESCE($10, passport_photo),
+        notes              = COALESCE($11, notes),
+        updated_at         = NOW()
+       WHERE id = $12
+       RETURNING id, name, email, role, phone, is_active, updated_at,
+                 date_of_birth, gender, address, ghana_card_number,
+                 emergency_name, emergency_phone, emergency_relation,
+                 passport_photo, notes`,
+      [
+        name, phone, date_of_birth || null, gender || null,
+        address || null, ghana_card_number || null,
+        emergency_name || null, emergency_phone || null, emergency_relation || null,
+        passport_photo || null, notes || null,
+        req.user.id,
+      ]
+    );
+    res.json({ success: true, message: 'Profile updated', user: result.rows[0] });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+/* ─── CHANGE own password ─────────────────────────────────────── */
+const changePassword = async (req, res) => {
+  try {
+    const { current_password, new_password } = req.body;
+
+    if (!current_password || !new_password) {
+      return res.status(400).json({ success: false, message: 'Current and new password are required' });
+    }
+    if (new_password.length < 8) {
+      return res.status(400).json({ success: false, message: 'New password must be at least 8 characters' });
+    }
+    if (!/\d/.test(new_password)) {
+      return res.status(400).json({ success: false, message: 'New password must contain at least one number' });
+    }
+
+    const user = await pool.query('SELECT password FROM users WHERE id = $1', [req.user.id]);
+    const match = await bcrypt.compare(current_password, user.rows[0].password);
+    if (!match) {
+      return res.status(400).json({ success: false, message: 'Current password is incorrect' });
+    }
+
+    const salt   = await bcrypt.genSalt(10);
+    const hashed = await bcrypt.hash(new_password, salt);
+    await pool.query('UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2', [hashed, req.user.id]);
+
+    res.json({ success: true, message: 'Password changed successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+/* ─── Audit log ───────────────────────────────────────────────── */
+const getAuditLog = async (req, res) => {
+  try {
+    const { page = 1, limit = 50, action, user_id, start_date, end_date } = req.query;
+    const offset = (page - 1) * limit;
+    const conditions = [];
+    const values = [];
+    let i = 1;
+
+    if (action)     { conditions.push(`al.action = $${i++}`);              values.push(action); }
+    if (user_id)    { conditions.push(`al.user_id = $${i++}`);             values.push(user_id); }
+    if (start_date) { conditions.push(`DATE(al.created_at) >= $${i++}`);   values.push(start_date); }
+    if (end_date)   { conditions.push(`DATE(al.created_at) <= $${i++}`);   values.push(end_date); }
+
+    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+
+    const countResult = await pool.query(
+      `SELECT COUNT(*) FROM audit_logs al ${where}`, values
+    );
+
+    const result = await pool.query(
+      `SELECT al.*, u.name as user_name, u.role as user_role
+       FROM audit_logs al
+       LEFT JOIN users u ON al.user_id = u.id
+       ${where}
+       ORDER BY al.created_at DESC
+       LIMIT $${i} OFFSET $${i + 1}`,
+      [...values, limit, offset]
+    );
+
+    res.json({
+      success: true,
+      total:  parseInt(countResult.rows[0].count),
+      pages:  Math.ceil(parseInt(countResult.rows[0].count) / limit),
+      logs:   result.rows,
+    });
+  } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+/* ─── Exports ─────────────────────────────────────────────────── */
 module.exports = {
-  getUsers,
-  getUser,
-  createUser,
-  updateUser,
-  toggleUserStatus,
-  deleteUser,
-  getRoles,
-  createUserValidation,
-  updateUserValidation,
+  getUsers, getUser, createUser, updateUser,
+  toggleUserStatus, deleteUser, getRoles,
+  getProfile, updateProfile, changePassword, getAuditLog,
+  createUserValidation, updateUserValidation,
 };

@@ -47,13 +47,19 @@ export const authAPI = {
 };
 
 export const usersAPI = {
-  getAll: (params) => API.get('/users', { params }),
-  getOne: (id) => API.get(`/users/${id}`),
-  create: (data) => API.post('/users', data),
-  update: (id, data) => API.put(`/users/${id}`, data),
-  toggle: (id) => API.patch(`/users/${id}/toggle`),
-  delete: (id) => API.delete(`/users/${id}`),
-  getRoles: () => API.get('/users/roles'),
+  getAll:          (params) => API.get('/users', { params }),
+  getOne:          (id)     => API.get(`/users/${id}`),
+  create:          (data)   => API.post('/users', data),
+  update:          (id, data) => API.put(`/users/${id}`, data),
+  toggle:          (id)     => API.patch(`/users/${id}/toggle`),
+  delete:          (id)     => API.delete(`/users/${id}`),
+  getRoles:        ()       => API.get('/users/roles'),
+  // Own profile
+  getProfile:      ()       => API.get('/users/profile'),
+  updateProfile:   (data)   => API.put('/users/profile', data),
+  changePassword:  (data)   => API.post('/users/change-password', data),
+  // Audit log — super_admin only
+  getAuditLog:     (params) => API.get('/users/audit-log', { params }),
 };
 
 export const productsAPI = {
@@ -67,6 +73,8 @@ export const productsAPI = {
 };
 
 export const customersAPI = {
+  getProfile: (id) => API.get(`/customers/${id}/profile`),
+  updateNotes: (id, data) => API.put(`/customers/${id}/notes`, data),
   getAll: (params) => API.get('/customers', { params }),
   getOne: (id) => API.get(`/customers/${id}`),
   create: (data) => API.post('/customers', data),
@@ -90,6 +98,7 @@ export const ridersAPI = {
   delete: (id) => API.delete(`/riders/${id}`),
   assignDelivery: (data) => API.post('/riders/assign', data),
   updateDeliveryStatus: (id, data) => API.put(`/riders/delivery/${id}/status`, data),
+  resetAvailability: () => API.post('/riders/reset-availability'),
 };
 
 export const cashAPI = {
@@ -109,4 +118,56 @@ export const paymentsAPI = {
   getSummary: (params) => API.get('/payments/summary', { params }),
 };
 
+export const businessProfileAPI = {
+  get:    ()     => API.get('/business-profile'),
+  update: (data) => API.put('/business-profile', data),
+};
+
+/* ─── Add to frontend/src/utils/api.js, alongside businessProfileAPI ─── */
+
+export const pricingSettingsAPI = {
+  get:    ()     => API.get('/pricing-settings'),
+  update: (data) => API.put('/pricing-settings', data),
+};
+
+export const deliveryZonesAPI = {
+  getAll: ()           => API.get('/delivery-zones'),
+  create: (data)        => API.post('/delivery-zones', data),
+  update: (id, data)    => API.put(`/delivery-zones/${id}`, data),
+  delete: (id)          => API.delete(`/delivery-zones/${id}`),
+};
+
+export const surchargeRulesAPI = {
+  getAll: ()           => API.get('/surcharge-rules'),
+  create: (data)        => API.post('/surcharge-rules', data),
+  update: (id, data)    => API.put(`/surcharge-rules/${id}`, data),
+  delete: (id)          => API.delete(`/surcharge-rules/${id}`),
+};
+
+export const discountRulesAPI = {
+  getAll: ()           => API.get('/discount-rules'),
+  create: (data)        => API.post('/discount-rules', data),
+  update: (id, data)    => API.put(`/discount-rules/${id}`, data),
+  delete: (id)          => API.delete(`/discount-rules/${id}`),
+};
+
+export const expensesAPI = {
+  getAll:      (params) => API.get('/expenses', { params }),
+  getSummary:  (params) => API.get('/expenses/summary', { params }),
+  create:      (data)   => API.post('/expenses', data),
+  update:      (id, data) => API.put(`/expenses/${id}`, data),
+  delete:      (id)     => API.delete(`/expenses/${id}`),
+};
+
+/* ─── Add to frontend/src/utils/api.js ─── */
+
+export const settlementsAPI = {
+  getOutstanding: (riderId)    => API.get(`/settlements/outstanding/${riderId}`),
+  declare:        (data)       => API.post('/settlements', data),
+  getAll:         (params)     => API.get('/settlements', { params }),
+  approve:        (id, data)   => API.put(`/settlements/${id}/approve`, data),
+};
+
+
 export default API;
+

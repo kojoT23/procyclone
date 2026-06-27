@@ -1,5 +1,10 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import API from '../utils/api';
+import { ridersAPI } from '../utils/api';
+import WhatsAppSettings from './WhatsAppSettings';
+import TelegramSettings from './TelegramSettings';
+import BusinessProfileTab from '../components/BusinessProfileTab';
+import DeliveryPricingTab from '../components/DeliveryPricingTab';
 import { useAuth } from '../context/AuthContext';
 
 /* ─── Settings API ────────────────────────────────────────────── */
@@ -95,6 +100,7 @@ const Settings = () => {
   const [stats,        setStats]        = useState(null);
   const [resetLogs,    setResetLogs]    = useState([]);
   const [loadingStats, setLoadingStats] = useState(true);
+  const [allRiders,    setAllRiders]    = useState([]);
   const [modal,        setModal]        = useState(null); // config object
   const [actionLoading, setActionLoading] = useState(false);
   const [toast,        setToast]        = useState(null);
@@ -109,10 +115,12 @@ const Settings = () => {
     if (!isAdmin) return;
     try {
       setLoadingStats(true);
-      const [statsRes, logsRes] = await Promise.all([
+      const [statsRes, logsRes, ridersRes] = await Promise.all([
         settingsAPI.getStats(),
         settingsAPI.getResetLogs(),
+        ridersAPI.getAll({ limit: 100 }),
       ]);
+      setAllRiders(ridersRes.data.riders || []);
       setStats(statsRes.data.stats);
       setResetLogs(logsRes.data.logs || []);
     } catch {
@@ -226,11 +234,14 @@ const Settings = () => {
 
   /* ── Tabs ──────────────────────────────────────────────────── */
   const tabs = [
-    { key: 'general',  label: '🏪 General'  },
-    { key: 'account',  label: '👤 Account'  },
-    ...(isAdmin ? [{ key: 'danger', label: '⚠️ Danger Zone' }] : []),
-  ];
-
+  { key: 'general',  label: '🏪 General'  },
+  { key: 'business', label: '🏢 Business Profile' },
+  { key: 'delivery',  label: '🚚 Delivery & Pricing' }, 
+  { key: 'account',  label: '👤 Account'  },
+  { key: 'whatsapp', label: '💬 WhatsApp' },
+  { key: 'telegram', label: '✈️ Telegram' },
+  ...(isAdmin ? [{ key: 'danger', label: '⚠️ Danger Zone' }] : []),
+];
   /* ── Action log label ──────────────────────────────────────── */
   const actionLabel = (action) => {
     const map = {
@@ -387,6 +398,12 @@ const Settings = () => {
           )}
         </div>
       )}
+      
+     {/* ════════════════════════════════════════════════════════
+          TAB: Business Profile
+      ════════════════════════════════════════════════════════ */}
+      {activeTab === 'business' && <BusinessProfileTab currentUser={user} />} 
+      {activeTab === 'delivery' && <DeliveryPricingTab currentUser={user} />}
 
       {/* ════════════════════════════════════════════════════════
           TAB: Account
@@ -460,6 +477,13 @@ const Settings = () => {
           </div>
         </div>
       )}
+
+      {/* ════════════════════════════════════════════════════════
+          TAB: WhatsApp
+      ════════════════════════════════════════════════════════ */}
+      {activeTab === 'whatsapp' && <WhatsAppSettings />}
+
+      {activeTab === 'telegram' && <TelegramSettings riders={allRiders} />}
 
       {/* ════════════════════════════════════════════════════════
           TAB: Danger Zone (admin + super_admin only)

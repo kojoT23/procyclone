@@ -24,7 +24,7 @@ const getCashLogs = async (req, res) => {
        FROM cash_logs cl
        LEFT JOIN riders r ON cl.rider_id = r.id
        LEFT JOIN orders o ON cl.order_id = o.id
-       LEFT JOIN users u ON cl.verified_at IS NOT NULL AND cl.rider_id = u.id
+       LEFT JOIN users u ON cl.verified_by = u.id
        ${where}
        ORDER BY cl.created_at DESC LIMIT $${i} OFFSET $${i + 1}`,
       [...values, limit, offset]
@@ -67,9 +67,9 @@ const verifyCashLog = async (req, res) => {
   try {
     const { id } = req.params;
     const result = await pool.query(
-      `UPDATE cash_logs SET status = 'verified', verified_at = NOW()
-       WHERE id = $1 AND status = 'pending' RETURNING *`,
-      [id]
+      `UPDATE cash_logs SET status = 'verified', verified_at = NOW(), verified_by = $1
+       WHERE id = $2 AND status = 'pending' RETURNING *`,
+      [req.user?.id || null, id]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Cash log not found or already verified' });
@@ -100,6 +100,7 @@ const disputeCashLog = async (req, res) => {
 
 const getDailyReport = async (req, res) => {
   try {
+    const { date } = req.query;
     const targetDate = date || new Date().toISOString().split('T')[0];
 
     // Total orders today

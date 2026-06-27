@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { paymentsAPI, ordersAPI } from '../utils/api';
+import { paymentsAPI, ordersAPI, businessProfileAPI } from '../utils/api';
 import './CodReceipt.css';
 
 /* ─── CSV helper ───────────────────────────────────────────────── */
@@ -57,7 +57,7 @@ const StatusBadge = ({ status }) => {
    COD RECEIPT — rendered into a hidden div, printed via window.print()
    Only shown / generated for method === 'cod'
 ═══════════════════════════════════════════════════════════════════ */
-const CodReceiptDocument = React.forwardRef(({ payment, order }, ref) => {
+const CodReceiptDocument = React.forwardRef(({ payment, order, businessProfile }, ref) => {
   if (!payment || !order) return null;
   const items    = order.items || [];
   const receiptNo = `REC-${payment.id?.toString().padStart(5, '0')}`;
@@ -74,8 +74,12 @@ const CodReceiptDocument = React.forwardRef(({ payment, order }, ref) => {
           <div className="cod-receipt__logo">SW</div>
           <div>
             <div className="cod-receipt__brand-name">Shorewinds</div>
-            <div className="cod-receipt__brand-sub">[Address line 1]</div>
-            <div className="cod-receipt__brand-sub">[City, Region · Phone]</div>
+            {businessProfile?.address && (
+            <div className="cod-receipt__brand-sub">{businessProfile.address}</div>
+              )}
+             {businessProfile?.phone && (
+            <div className="cod-receipt__brand-sub">{businessProfile.phone}</div>
+              )}
           </div>
         </div>
         <div className="cod-receipt__meta">
@@ -191,7 +195,7 @@ const CodReceiptDocument = React.forwardRef(({ payment, order }, ref) => {
       {/* ── Footer ──────────────────────────────────────────── */}
       <div className="cod-receipt__footer">
         <p>Thank you for your purchase — Shorewinds</p>
-        <p>[Website] · [Email] · [Phone]</p>
+        <p>{businessProfile?.phone && `Tel: ${businessProfile.phone}`}{businessProfile?.phone && businessProfile?.momo_number && ' · '}{businessProfile?.momo_number && `MoMo: ${businessProfile.momo_number}`}</p>
         <p style={{ marginTop: '6px', fontSize: '9px', color: '#94a3b8' }}>
           Powered by Shorewinds · Receipt #{receiptNo}
         </p>
@@ -230,6 +234,7 @@ const Payments = () => {
   const [receiptPayment,   setReceiptPayment]   = useState(null);
   const [receiptOrder,     setReceiptOrder]     = useState(null);
   const [loadingOrder,     setLoadingOrder]     = useState(false);
+  const [businessProfile, setBusinessProfile] = useState(null);
   const receiptRef = useRef();
 
   /* ── Fetch ─────────────────────────────────────────────────── */
@@ -262,7 +267,11 @@ const Payments = () => {
 
   useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => { setPage(1); },  [filterStatus, filterMethod, filterDate]);
-
+  useEffect(() => {
+  businessProfileAPI.get()
+    .then(res => setBusinessProfile(res.data.profile))
+    .catch(() => {});
+}, []);
   /* ── Derived summary ──────────────────────────────────────── */
   const globalPending = summary?.pending_verification;
   const summaryRows   = summary?.summary || [];
@@ -373,9 +382,11 @@ const Payments = () => {
       <div className="cod-receipt-print-wrapper">
         <CodReceiptDocument
           ref={receiptRef}
+          businessProfile={businessProfile}
           payment={receiptPayment}
           order={receiptOrder}
-        />
+         />
+        
       </div>
 
       {/* ── Screen UI ──────────────────────────────────────────── */}
@@ -818,6 +829,7 @@ const Payments = () => {
                 fontFamily: 'DM Sans, sans-serif',
               }}>
                 <CodReceiptDocument
+                  businessProfile={businessProfile}
                   payment={receiptPayment}
                   order={receiptOrder}
                 />
