@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 const API = axios.create({
-  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5000/api',
+  baseURL: process.env.REACT_APP_API_URL || 'http://localhost:5001/api',
 });
 
 API.interceptors.request.use((config) => {
@@ -19,7 +19,7 @@ API.interceptors.response.use(
       try {
         const refreshToken = localStorage.getItem('refreshToken');
         const res = await axios.post(
-          `${process.env.REACT_APP_API_URL || 'http://localhost:5000/api'}/auth/refresh`,
+          `${process.env.REACT_APP_API_URL || 'http://localhost:5001/api'}/auth/refresh`,
           { refreshToken }
         );
         localStorage.setItem('accessToken', res.data.accessToken);
