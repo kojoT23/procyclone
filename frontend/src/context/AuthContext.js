@@ -4,9 +4,9 @@ import { authAPI } from '../utils/api';
 const AuthContext = createContext();
 
 const rolePermissions = {
-  super_admin: ['manage_users','manage_products','manage_orders','manage_customers','manage_riders','manage_cash','view_reports','manage_settings','delete_records'],
-  admin: ['manage_users','manage_products','manage_orders','manage_customers','manage_riders','manage_cash','view_reports','delete_records'],
-  manager: ['manage_products','manage_orders','manage_customers','manage_riders','view_reports'],
+  super_admin: ['manage_users','manage_products','manage_orders','manage_customers','manage_riders','manage_cash','manage_expenses','view_reports','manage_settings','delete_records'],
+  admin: ['manage_users','manage_products','manage_orders','manage_customers','manage_riders','manage_cash','manage_expenses','view_reports','delete_records'],
+  manager: ['manage_products','manage_orders','manage_customers','manage_riders','manage_expenses','view_reports'],
   cashier: ['manage_orders','manage_customers','manage_cash'],
   dispatcher: ['manage_orders','manage_riders'],
   warehouse: ['manage_products'],

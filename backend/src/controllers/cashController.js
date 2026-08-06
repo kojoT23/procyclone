@@ -20,7 +20,10 @@ const getCashLogs = async (req, res) => {
 
     const result = await pool.query(
       `SELECT cl.*, r.name as rider_name, r.phone as rider_phone,
-              o.order_number, u.name as verified_by_name
+              o.order_number, u.name as verified_by_name,
+              (SELECT id FROM cash_logs res WHERE res.resolves_log_id = cl.id ORDER BY res.created_at DESC LIMIT 1) as resolving_log_id,
+              (SELECT amount FROM cash_logs res WHERE res.resolves_log_id = cl.id ORDER BY res.created_at DESC LIMIT 1) as resolving_log_amount,
+              (SELECT status FROM cash_logs res WHERE res.resolves_log_id = cl.id ORDER BY res.created_at DESC LIMIT 1) as resolving_log_status
        FROM cash_logs cl
        LEFT JOIN riders r ON cl.rider_id = r.id
        LEFT JOIN orders o ON cl.order_id = o.id
@@ -46,19 +49,99 @@ const getCashLogs = async (req, res) => {
 
 const createCashLog = async (req, res) => {
   try {
-    const { rider_id, order_id, amount, notes } = req.body;
-    if (!rider_id || !amount) {
+    const { rider_id, order_id, amount, notes, resolves_log_id } = req.body;
+    let effectiveRiderId = rider_id;
+    let effectiveOrderId = order_id;
+
+    // If a rider is submitting this themselves, force rider_id to the
+    // rider profile actually linked to their account — never trust a
+    // rider_id passed in the request body for a rider caller, since
+    // that would let one rider log (or "cover") cash under another
+    // rider's name. Admins/managers/etc. keep passing rider_id
+    // explicitly, since they're logging on someone's behalf.
+    if (req.user?.role === 'rider') {
+      const ownRider = await pool.query(`SELECT id FROM riders WHERE user_id = $1`, [req.user.id]);
+      if (ownRider.rows.length === 0) {
+        return res.status(403).json({ success: false, message: 'No rider profile linked to your account' });
+      }
+      effectiveRiderId = ownRider.rows[0].id;
+    }
+
+    if (!effectiveRiderId || !amount) {
       return res.status(400).json({ success: false, message: 'Rider and amount are required' });
     }
 
+    // If this log is meant to cover a specific dispute, validate that
+    // dispute actually exists, is still disputed, and — critically —
+    // belongs to the same rider. This is the theft-control boundary:
+    // a rider (or anyone) must not be able to link their payment to
+    // someone else's shortfall.
+    if (resolves_log_id) {
+      const target = await pool.query(
+        `SELECT id, rider_id, order_id, status FROM cash_logs WHERE id = $1`,
+        [resolves_log_id]
+      );
+      if (target.rows.length === 0) {
+        return res.status(404).json({ success: false, message: 'The dispute you are trying to resolve was not found' });
+      }
+      if (target.rows[0].status !== 'disputed') {
+        return res.status(400).json({ success: false, message: 'That cash log is not currently disputed' });
+      }
+      if (String(target.rows[0].rider_id) !== String(effectiveRiderId)) {
+        return res.status(403).json({ success: false, message: 'You can only submit against your own disputed collections' });
+      }
+      // Default order_id to the disputed log's order if none was passed
+      if (!effectiveOrderId) effectiveOrderId = target.rows[0].order_id;
+    }
+
+    let status = 'pending';
+    let finalNotes = notes || null;
+
+    // If this cash log is tied to a specific order, check whether the
+    // amount logged (combined with anything already logged for that
+    // same order — e.g. a rider topping up a prior shortfall) actually
+    // covers what the order is worth. If it falls short, auto-flag it
+    // as disputed instead of waiting for someone to notice manually.
+    // This does NOT skip admin review when things match — it only
+    // catches shortfalls earlier. A matching amount still lands as
+    // 'pending' and still needs an admin to click Verify.
+    if (effectiveOrderId) {
+      const orderResult = await pool.query(
+        `SELECT total_amount FROM orders WHERE id = $1`,
+        [effectiveOrderId]
+      );
+      if (orderResult.rows.length === 0) {
+        return res.status(404).json({ success: false, message: 'Order not found' });
+      }
+      const expected = parseFloat(orderResult.rows[0].total_amount);
+
+      const priorResult = await pool.query(
+        `SELECT COALESCE(SUM(amount), 0) as prior_total FROM cash_logs WHERE order_id = $1`,
+        [effectiveOrderId]
+      );
+      const priorTotal = parseFloat(priorResult.rows[0].prior_total);
+      const totalAfterThisLog = priorTotal + parseFloat(amount);
+
+      if (totalAfterThisLog < expected) {
+        const shortfall = (expected - totalAfterThisLog).toFixed(2);
+        status = 'disputed';
+        finalNotes = `${finalNotes ? finalNotes + ' | ' : ''}Auto-flagged: GHS ${shortfall} short of expected GHS ${expected.toFixed(2)} for this order`;
+      }
+    }
+
     const result = await pool.query(
-      `INSERT INTO cash_logs (rider_id, order_id, amount, notes)
-       VALUES ($1, $2, $3, $4) RETURNING *`,
-      [rider_id, order_id, amount, notes]
+      `INSERT INTO cash_logs (rider_id, order_id, amount, notes, status, resolves_log_id)
+       VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+      [effectiveRiderId, effectiveOrderId, amount, finalNotes, status, resolves_log_id || null]
     );
 
-    res.status(201).json({ success: true, message: 'Cash logged', log: result.rows[0] });
+    res.status(201).json({
+      success: true,
+      message: status === 'disputed' ? 'Cash logged — short of expected amount, flagged as disputed' : 'Cash logged',
+      log: result.rows[0],
+    });
   } catch (error) {
+    console.error('createCashLog error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
@@ -66,6 +149,30 @@ const createCashLog = async (req, res) => {
 const verifyCashLog = async (req, res) => {
   try {
     const { id } = req.params;
+
+    // customer_support gets verify access, but only for physical cash
+    // they'd have directly witnessed themselves — COD is collected by a
+    // different person (the rider), days later, so self-verifying it
+    // wouldn't mean anything as an actual check. Every other allowed
+    // role (super_admin/admin/manager/cashier) can verify either.
+    if (req.user.role === 'customer_support') {
+      const log = await pool.query(
+        `SELECT o.payment_method FROM cash_logs cl
+         LEFT JOIN orders o ON cl.order_id = o.id
+         WHERE cl.id = $1`,
+        [id]
+      );
+      if (log.rows.length === 0) {
+        return res.status(404).json({ success: false, message: 'Cash log not found' });
+      }
+      if (log.rows[0].payment_method !== 'cash') {
+        return res.status(403).json({
+          success: false,
+          message: 'Support staff can only verify physical cash sales — COD collections are verified by the finance team.',
+        });
+      }
+    }
+
     const result = await pool.query(
       `UPDATE cash_logs SET status = 'verified', verified_at = NOW(), verified_by = $1
        WHERE id = $2 AND status = 'pending' RETURNING *`,
@@ -94,6 +201,34 @@ const disputeCashLog = async (req, res) => {
     }
     res.json({ success: true, message: 'Cash log marked as disputed', log: result.rows[0] });
   } catch (error) {
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+const resolveCashLog = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { resolution_notes, resolved_amount } = req.body;
+
+    const result = await pool.query(
+      `UPDATE cash_logs
+       SET status = 'resolved',
+           resolved_by = $1,
+           resolved_at = NOW(),
+           resolution_notes = COALESCE($2, resolution_notes),
+           resolved_amount = $3
+       WHERE id = $4 AND status = 'disputed'
+       RETURNING *`,
+      [req.user?.id || null, resolution_notes || null, resolved_amount || null, id]
+    );
+
+    if (result.rows.length === 0) {
+      return res.status(404).json({ success: false, message: 'Cash log not found or not currently disputed' });
+    }
+
+    res.json({ success: true, message: 'Dispute resolved', log: result.rows[0] });
+  } catch (error) {
+    console.error('resolveCashLog error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
@@ -222,6 +357,7 @@ module.exports = {
   createCashLog,
   verifyCashLog,
   disputeCashLog,
+  resolveCashLog,
   getDailyReport,
   getRiderReconciliation,
 };

@@ -4,18 +4,21 @@ import { settlementsAPI, ridersAPI } from '../utils/api';
 
 /* ═══════════════════════════════════════════════════════════════════
    SETTLEMENTS PAGE
-   There is no 'rider' role in this system (real roles: admin,
-   cashier, manager, super_admin) — whether someone is a rider is
-   determined by riders.user_id matching the logged-in user, not by
-   their role. So this page checks that directly via an API call,
-   rather than checking user.role, which would be the wrong signal.
-═══════════════════════════════════════════════════════════════════ */
+   Two separate visibility rules, matching backend/src/config/roles.js:
+   - Financial Overview & rider-cash review queue are visible to anyone
+     who can view_reports: super_admin, admin, manager, accountant, auditor.
+   - Actually APPROVING a settlement is gated by manage_cash on the
+     backend, held by: super_admin, admin, accountant, cashier (note:
+     manager does NOT have manage_cash — deliberately excluded here so
+     the UI doesn't show a button that the backend will then reject).
+   'rider' is a real role in this system — a person's rider status is
+   still resolved via the riders table (user_id match) rather than the
+   role string, since someone could hold a non-rider role and still
+   have a linked rider profile, or vice versa. ═══════════════════════════════════════════════════════════════════ */
 const Settlements = () => {
   const { user } = useAuth();
-  const isOfficeStaff = ['admin', 'manager', 'super_admin'].includes(user?.role);
-
-  const [loading, setLoading] = useState(true);
-  const [myRiderId, setMyRiderId] = useState(null);
+  const canViewFinancials = ['super_admin', 'admin', 'manager', 'accountant', 'auditor'].includes(user?.role);
+  const canApproveCash = ['super_admin', 'admin', 'accountant', 'cashier'].includes(user?.role);
 
   return (
     <div>
@@ -27,7 +30,8 @@ const Settlements = () => {
       </div>
       <SettlementsBody
         user={user}
-        isOfficeStaff={isOfficeStaff}
+        canViewFinancials={canViewFinancials}
+        canApproveCash={canApproveCash}
       />
     </div>
   );
@@ -35,10 +39,9 @@ const Settlements = () => {
 
 /* ─── Resolve identity then render the right view(s) ──────────────
    A person can be BOTH a rider AND office staff in principle (e.g.
-   a manager who also rides sometimes) — so we show the rider card
-   if they have a rider profile, AND the office queue if they have
-   office permissions. Neither is exclusive of the other. ── */
-const SettlementsBody = ({ user, isOfficeStaff }) => {
+   an accountant who also rides sometimes) — so we show the rider card
+   if they have a rider profile, independent of their other permissions. ── */
+const SettlementsBody = ({ user, canViewFinancials, canApproveCash }) => {
   const [checkingRider, setCheckingRider] = useState(true);
   const [myRider, setMyRider] = useState(null);
 
@@ -66,7 +69,7 @@ const SettlementsBody = ({ user, isOfficeStaff }) => {
     );
   }
 
-  if (!myRider && !isOfficeStaff) {
+  if (!myRider && !canViewFinancials && !canApproveCash) {
     return (
       <div className="empty-state">
         <div className="empty-icon">🔒</div>
@@ -78,8 +81,114 @@ const SettlementsBody = ({ user, isOfficeStaff }) => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+      {canViewFinancials && <FinancialOverviewCard />}
       {myRider && <RiderOutstandingCard rider={myRider} />}
-      {isOfficeStaff && <OfficeSettlementQueue />}
+      {canApproveCash && <OfficeSettlementQueue />}
+    </div>
+  );
+};
+
+/* ═══════════════════════════════════════════════════════════════
+   FINANCIAL OVERVIEW — the "all monies" view: rider cash still
+   outstanding, expenses, import spend, and revenue, all in one
+   place instead of three separate pages. Office staff only.
+═══════════════════════════════════════════════════════════════ */
+const FinancialOverviewCard = () => {
+  const [loading, setLoading] = useState(true);
+  const [data, setData] = useState(null);
+  const [range, setRange] = useState({ start_date: '', end_date: '' });
+  const [error, setError] = useState('');
+
+  const fetchOverview = useCallback(async () => {
+    try {
+      setLoading(true);
+      setError('');
+      const params = {};
+      if (range.start_date && range.end_date) {
+        params.start_date = range.start_date;
+        params.end_date = range.end_date;
+      }
+      const res = await settlementsAPI.getOverview(params);
+      setData(res.data);
+    } catch (err) {
+      console.error('Failed to load financial overview:', err);
+      setError(err.response?.data?.message || 'Could not load the financial overview');
+    } finally {
+      setLoading(false);
+    }
+  }, [range]);
+
+  useEffect(() => { fetchOverview(); }, [fetchOverview]);
+
+  const fmt = (n) => `GH₵ ${parseFloat(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
+  const periodLabel = data?.period?.days
+    ? `Last ${data.period.days} days`
+    : data?.period
+      ? `${data.period.start_date} → ${data.period.end_date}`
+      : '';
+
+  return (
+    <div className="card">
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: 10, marginBottom: 4 }}>
+        <div>
+          <h3 style={{ fontSize: '15px', fontWeight: '700', margin: '0 0 4px' }}>Financial Overview</h3>
+          <p style={{ color: 'var(--text-2)', fontSize: '13px', margin: 0 }}>
+            All money currently in motion — rider cash, expenses, imports, and revenue{periodLabel ? ` · ${periodLabel}` : ''}
+          </p>
+        </div>
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input type="date" className="form-input" style={{ width: 150 }} value={range.start_date}
+            onChange={e => setRange(r => ({ ...r, start_date: e.target.value }))} />
+          <input type="date" className="form-input" style={{ width: 150 }} value={range.end_date}
+            onChange={e => setRange(r => ({ ...r, end_date: e.target.value }))} />
+          <button className="btn" onClick={() => setRange({ start_date: '', end_date: '' })}>Reset</button>
+        </div>
+      </div>
+
+      {loading ? (
+        <div className="loading" style={{ padding: '20px 0' }}>
+          <div className="loading-spinner" />
+          <span className="loading-text">Loading…</span>
+        </div>
+      ) : error ? (
+        <div className="alert alert-danger" style={{ marginTop: 12 }}>{error}</div>
+      ) : (
+        <div className="stats-grid" style={{ marginTop: 16 }}>
+          <div className="stat-card">
+            <div className="stat-label">Rider Cash Outstanding</div>
+            <div className="stat-value" style={{ color: data.outstanding_rider_cash > 0 ? '#c2410c' : '#16a34a' }}>
+              {fmt(data.outstanding_rider_cash)}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
+              across {data.outstanding_order_count} order{data.outstanding_order_count !== 1 ? 's' : ''}, fleet-wide
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Expenses (Period)</div>
+            <div className="stat-value" style={{ color: '#ef4444' }}>{fmt(data.period_expenses)}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Import Spend</div>
+            <div className="stat-value" style={{ color: '#f59e0b' }}>{fmt(data.import_actual_spent)}</div>
+            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
+              {fmt(data.import_budgeted)} budgeted total
+            </div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Revenue (Period)</div>
+            <div className="stat-value" style={{ color: '#16a34a' }}>{fmt(data.period_revenue)}</div>
+          </div>
+          <div className="stat-card">
+            <div className="stat-label">Net Position</div>
+            <div className="stat-value" style={{ color: data.net_position >= 0 ? '#16a34a' : '#ef4444' }}>
+              {fmt(data.net_position)}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-3)', marginTop: 4 }}>
+              revenue − expenses − import spend
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

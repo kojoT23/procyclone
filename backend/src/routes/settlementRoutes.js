@@ -2,6 +2,7 @@ const express = require('express');
 const router  = express.Router();
 const {
   getOutstanding, declareSettlement, getSettlements, approveSettlement,
+  getFinancialOverview,
   declareSettlementValidation, approveSettlementValidation,
 } = require('../controllers/settlementController');
 const { protect, authorize } = require('../middleware/auth');
@@ -9,6 +10,12 @@ const validate = require('../middleware/validate');
 const audit    = require('../middleware/auditLog');
 
 router.use(protect);
+
+// Office-only financial snapshot — rider cash, expenses, imports, revenue.
+// Read-only, so no audit() needed here (matches getOutstanding/getSettlements
+// below, which also don't log). Kept broader than the approve step below —
+// viewing a dashboard is lower-stakes than actually approving cash.
+router.get('/overview', authorize('admin', 'super_admin', 'manager', 'accountant'), getFinancialOverview);
 
 // Any authenticated user (rider checking their own, or office) can read
 router.get('/outstanding/:riderId', getOutstanding);

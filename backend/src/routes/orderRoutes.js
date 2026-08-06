@@ -1,8 +1,8 @@
 const express = require('express');
 const router  = express.Router();
 const {
-  getOrders, getOrder, createOrder, updateOrderStatus,
-  deleteOrder, createOrderValidation, updateStatusValidation,
+  getOrders, getOrder, createOrder, createBulkOrders, updateOrderStatus, cancelOrder, getDeliveryProof,
+  deleteOrder, createOrderValidation, createBulkOrdersValidation, updateStatusValidation,
 } = require('../controllers/orderController');
 const { protect, authorize } = require('../middleware/auth');
 const validate = require('../middleware/validate');
@@ -12,6 +12,7 @@ router.use(protect);
 
 router.get('/',    getOrders);
 router.get('/:id', getOrder);
+router.get('/:id/proof', getDeliveryProof);
 
 router.post('/',
   [...createOrderValidation], validate,
@@ -22,6 +23,15 @@ router.post('/',
   createOrder
 );
 
+router.post('/bulk',
+  [...createBulkOrdersValidation], validate,
+  audit('CREATE_BULK_ORDERS', 'order',
+    (req, data) => null,
+    (req, data) => `Mass Order: created ${data.created_count} order(s)${data.failed_count ? `, ${data.failed_count} failed` : ''}`
+  ),
+  createBulkOrders
+);
+
 router.put('/:id/status',
   [...updateStatusValidation], validate,
   audit('UPDATE_ORDER_STATUS', 'order',
@@ -29,6 +39,15 @@ router.put('/:id/status',
     (req) => `Changed order status to ${req.body.status}`
   ),
   updateOrderStatus
+);
+
+router.put('/:id/cancel',
+  authorize('super_admin', 'admin', 'manager', 'customer_support'),
+  audit('CANCEL_ORDER', 'order',
+    (req) => parseInt(req.params.id),
+    (req) => `Cancelled order${req.body.reason ? `: ${req.body.reason}` : ''}`
+  ),
+  cancelOrder
 );
 
 router.delete('/:id',

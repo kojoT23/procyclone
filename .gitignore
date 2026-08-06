@@ -3,3 +3,7 @@ node_modules
 node_modules
 .next
 build
+*.sql
+*.bak
+*.bak2
+.DS_Store

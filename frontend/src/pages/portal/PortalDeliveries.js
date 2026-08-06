@@ -1,362 +1,437 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ridersAPI } from '../../utils/api';
+import { ridersAPI, ordersAPI } from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
-import API from '../../utils/api';
+import { ReceiptDocument } from '../Receipts'; // side-effect: also loads Receipts.css
 
-const fmt = (n) => `GH₵ ${parseFloat(n || 0).toFixed(2)}`;
+// Delivery-level status (not order.status) — this is what
+// getRiderDeliveries returns directly on each row's `status` field.
+// assigned (initial) -> accepted -> picked_up -> delivered/failed/returned
+const STATUS = {
+  assigned:  { label: 'New',        color: '#14b8a6', bg: '#f0fdfa' },
+  accepted:  { label: 'Accepted',   color: '#3b82f6', bg: '#eff6ff' },
+  rejected:  { label: 'Rejected',   color: '#ef4444', bg: '#fef2f2' },
+  picked_up: { label: 'Picked Up',  color: '#0891b2', bg: '#ecfeff' },
+  delivered: { label: 'Delivered',  color: '#22c55e', bg: '#f0fdf4' },
+  failed:    { label: 'Failed',     color: '#ef4444', bg: '#fef2f2' },
+  returned:  { label: 'Returned',   color: '#ef4444', bg: '#fef2f2' },
+};
+const CLOSED_STATUSES = ['delivered', 'failed', 'returned', 'rejected'];
 
-const FAILURE_REASONS = [
-  'Customer not home',
-  'Wrong address',
-  'Customer refused delivery',
-  'Customer requested reschedule',
-  'Item damaged in transit',
-  'Security denied access',
-  'Other',
-];
-
-const ISSUE_TYPES = [
-  { key: 'failed', label: '❌ Failed Delivery', color: '#dc2626' },
-  { key: 'returned', label: '↩️ Returned to Sender', color: '#f59e0b' },
-  { key: 'damaged', label: '📦 Item Damaged', color: '#7c3aed' },
-];
-
-const StatusBadge = ({ status }) => {
-  const map = {
-    pending:          { bg: '#f3f4f6', color: '#6b7280', label: 'Pending' },
-    assigned:         { bg: '#dbeafe', color: '#1d4ed8', label: 'Assigned' },
-    picked_up:        { bg: '#ede9fe', color: '#7c3aed', label: 'Picked Up' },
-    out_for_delivery: { bg: '#fef3c7', color: '#d97706', label: 'Out for Delivery' },
-    delivered:        { bg: '#dcfce7', color: '#16a34a', label: '✅ Delivered' },
-    failed:           { bg: '#fee2e2', color: '#dc2626', label: '❌ Failed' },
-    returned:         { bg: '#fef3c7', color: '#f59e0b', label: '↩️ Returned' },
-    damaged:          { bg: '#ede9fe', color: '#7c3aed', label: '📦 Damaged' },
-  };
-  const s = map[status] || { bg: '#f3f4f6', color: '#6b7280', label: status };
-  return <span style={{ background: s.bg, color: s.color, padding: '3px 10px', borderRadius: 20, fontSize: 11, fontWeight: 700 }}>{s.label}</span>;
+const fmt = (n) => 'GHS ' + parseFloat(n || 0).toFixed(2);
+const timeAgo = (date) => {
+  if (!date) return '—';
+  const diff = Math.floor((Date.now() - new Date(date)) / 1000);
+  if (diff < 60) return `${diff}s ago`;
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return new Date(date).toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
 };
 
-export default function PortalDeliveries() {
+// Downscale + JPEG-compress the POD photo client-side before it ever hits
+// the network — a full-res phone photo can be 3-5MB, which is a real
+// problem on the network conditions this portal has to work under.
+const compressImage = (file, maxDim = 900, quality = 0.6) => new Promise((resolve, reject) => {
+  const reader = new FileReader();
+  reader.onerror = () => reject(new Error('Could not read image'));
+  reader.onload = () => {
+    const img = new Image();
+    img.onerror = () => reject(new Error('Could not load image'));
+    img.onload = () => {
+      let { width, height } = img;
+      if (width > height && width > maxDim) { height = Math.round(height * (maxDim / width)); width = maxDim; }
+      else if (height > maxDim) { width = Math.round(width * (maxDim / height)); height = maxDim; }
+      const canvas = document.createElement('canvas');
+      canvas.width = width; canvas.height = height;
+      canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+      resolve(canvas.toDataURL('image/jpeg', quality));
+    };
+    img.src = reader.result;
+  };
+  reader.readAsDataURL(file);
+});
+
+const card = { background: '#fff', borderRadius: 14, marginBottom: 10, boxShadow: '0 1px 3px rgba(0,0,0,0.04)', overflow: 'hidden' };
+const btn = { padding: '9px 12px', borderRadius: 8, border: 'none', fontSize: 12, fontWeight: 700, cursor: 'pointer' };
+
+const PODModal = ({ delivery, onClose, onConfirm }) => {
+  const [photoFile, setPhotoFile] = useState(null);
+  const [photoPreview, setPhotoPreview] = useState(null);
+  const [skipPhoto, setSkipPhoto] = useState(false);
+  const [recipientName, setRecipientName] = useState('');
+  const [notes, setNotes] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+
+  const handleFile = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setPhotoFile(file);
+    setPhotoPreview(URL.createObjectURL(file));
+    setError('');
+  };
+
+  const handleConfirm = async () => {
+    if (!photoFile && !skipPhoto) { setError('Add a photo, or check "No photo available" below'); return; }
+    if (skipPhoto && !notes.trim()) { setError('Please explain why no photo was taken'); return; }
+    setSubmitting(true);
+    try {
+      const extra = { recipient_name: recipientName || undefined, delivery_notes: notes || undefined };
+      if (photoFile) extra.proof_photo = await compressImage(photoFile);
+      await onConfirm(extra);
+    } catch (err) {
+      setError('Could not process photo — try again or use "No photo available"');
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div onClick={onClose} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 250, display: 'flex', alignItems: 'flex-end', justifyContent: 'center' }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: '100%', maxWidth: 480, maxHeight: '88vh', overflowY: 'auto', background: '#fff', borderRadius: '20px 20px 0 0', padding: '20px 20px 28px' }}>
+        <div style={{ width: 36, height: 4, background: '#e5e7eb', borderRadius: 2, margin: '0 auto 16px' }} />
+        <div style={{ fontSize: 16, fontWeight: 800, color: '#1a1a18', marginBottom: 2 }}>Confirm Delivery</div>
+        <div style={{ fontSize: 13, color: '#9ca3af', marginBottom: 16 }}>{delivery.order_number} · {delivery.customer_name}</div>
+
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 8, display: 'block' }}>Proof Photo</span>
+
+        {photoPreview ? (
+          <div style={{ position: 'relative', marginBottom: 10 }}>
+            <img src={photoPreview} alt="Delivery proof" style={{ width: '100%', maxHeight: 240, objectFit: 'cover', borderRadius: 12 }} />
+            <button onClick={() => { setPhotoFile(null); setPhotoPreview(null); }}
+              style={{ position: 'absolute', top: 8, right: 8, width: 28, height: 28, borderRadius: '50%', border: 'none', background: 'rgba(0,0,0,0.6)', color: '#fff', fontSize: 14, cursor: 'pointer' }}>✕</button>
+          </div>
+        ) : (
+          <label style={{
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
+            height: 110, borderRadius: 12, border: '2px dashed #d1d5db', color: '#9ca3af',
+            cursor: skipPhoto ? 'not-allowed' : 'pointer', marginBottom: 10, opacity: skipPhoto ? 0.5 : 1,
+          }}>
+            <span style={{ fontSize: 24 }}>📷</span>
+            <span style={{ fontSize: 12, fontWeight: 600, marginTop: 4 }}>Tap to take photo</span>
+            <input type="file" accept="image/*" capture="environment" onChange={handleFile} disabled={skipPhoto} style={{ display: 'none' }} />
+          </label>
+        )}
+
+        <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: '#6b7280', marginBottom: 14, cursor: 'pointer' }}>
+          <input type="checkbox" checked={skipPhoto} onChange={e => { setSkipPhoto(e.target.checked); if (e.target.checked) { setPhotoFile(null); setPhotoPreview(null); } setError(''); }} />
+          No photo available (requires a note explaining why)
+        </label>
+
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 8, display: 'block' }}>Received by (optional)</span>
+        <input value={recipientName} onChange={e => setRecipientName(e.target.value)} placeholder="Name of person who received it"
+          style={{ width: '100%', padding: '11px 12px', borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 14, boxSizing: 'border-box', marginBottom: 12 }} />
+
+        <span style={{ fontSize: 12, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', letterSpacing: '0.4px', marginBottom: 8, display: 'block' }}>
+          Notes {skipPhoto && <span style={{ color: '#ef4444' }}>(required)</span>}
+        </span>
+        <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder={skipPhoto ? 'Why is there no photo?' : 'Optional delivery notes'}
+          style={{ width: '100%', minHeight: 60, padding: '11px 12px', borderRadius: 10, border: '1px solid #e5e7eb', fontSize: 14, boxSizing: 'border-box', resize: 'vertical' }} />
+
+        {error && <div style={{ color: '#ef4444', fontSize: 12, marginTop: 8 }}>{error}</div>}
+
+        <div style={{ display: 'flex', gap: 10, marginTop: 18 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: '12px 0', borderRadius: 10, border: '1px solid #e5e7eb', background: '#fff', color: '#6b7280', fontWeight: 600, cursor: 'pointer' }}>Cancel</button>
+          <button onClick={handleConfirm} disabled={submitting} style={{ flex: 1, padding: '12px 0', borderRadius: 10, border: 'none', background: '#22c55e', color: '#fff', fontWeight: 700, cursor: 'pointer', opacity: submitting ? 0.6 : 1 }}>
+            {submitting ? 'Confirming…' : 'Confirm Delivery'}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const DeliveryCard = ({ delivery, onAccept, onReject, onStatusUpdate, onRequestPOD, onPrint, printingId, busy }) => {
+  const [expanded, setExpanded] = useState(false);
+  const st = STATUS[delivery.status] || STATUS.assigned;
+
+  return (
+    <div style={{ ...card, borderLeft: `4px solid ${st.color}` }}>
+      <div onClick={() => setExpanded(e => !e)} style={{ padding: '13px 16px', cursor: 'pointer', background: expanded ? st.bg : '#fff' }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 12, fontWeight: 700, color: '#1a1a18' }}>{delivery.order_number}</span>
+              <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 7px', borderRadius: 10, background: st.bg, color: st.color, textTransform: 'uppercase' }}>
+                {st.label}
+              </span>
+              {(delivery.payment_method === 'cash' || delivery.payment_method === 'cod') ? (
+                <span style={{ fontSize: 10, color: '#f59e0b', fontWeight: 600 }}>💵 COD</span>
+              ) : (
+                <span style={{ fontSize: 10, color: '#3b82f6', fontWeight: 600 }}>📱 MoMo</span>
+              )}
+            </div>
+            <div style={{ fontSize: 12, color: '#6b7280', marginTop: 3 }}>{delivery.customer_name || '—'}</div>
+          </div>
+          <div style={{ textAlign: 'right', flexShrink: 0, marginLeft: 8 }}>
+            <div style={{ fontWeight: 800, fontSize: 13, color: '#1a1a18' }}>{fmt(delivery.total_amount)}</div>
+            <div style={{ fontSize: 10, color: '#9ca3af' }}>{timeAgo(delivery.assigned_at)}</div>
+          </div>
+        </div>
+      </div>
+
+      {expanded && (
+        <div style={{ padding: '0 16px 14px' }}>
+          <div style={{ fontSize: 12, color: '#6b7280', padding: '8px 0' }}>
+            <span style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase' }}>Delivery Address</span>
+            <p style={{ margin: '3px 0 0', fontWeight: 600, color: '#1a1a18' }}>📍 {delivery.delivery_address || delivery.customer_address || '—'}</p>
+          </div>
+
+          <div style={{ display: 'flex', gap: 16, marginBottom: 10 }}>
+            {delivery.customer_phone && (
+              <a href={`tel:${delivery.customer_phone}`} style={{ fontSize: 12, color: '#3b82f6', fontWeight: 600, textDecoration: 'none' }}>
+                📞 Call {delivery.customer_name}
+              </a>
+            )}
+            {(delivery.delivery_address || delivery.customer_address) && (
+              <a
+                href={`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(delivery.delivery_address || delivery.customer_address)}`}
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ fontSize: 12, color: '#16a34a', fontWeight: 600, textDecoration: 'none' }}
+              >
+                📍 Directions
+              </a>
+            )}
+          </div>
+
+          {delivery.items?.length > 0 && (
+            <div style={{ marginBottom: 10 }}>
+              <span style={{ fontSize: 10, fontWeight: 700, color: '#9ca3af', textTransform: 'uppercase' }}>Items</span>
+              {delivery.items.map((item, i) => (
+                <div key={i} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12.5, padding: '4px 0', color: '#1a1a18' }}>
+                  <span>{item.quantity}× {item.product_name}</span>
+                  <span style={{ fontWeight: 600 }}>{fmt(item.total_price)}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {delivery.order_notes && (
+            <div style={{ fontSize: 12, color: '#6b7280', background: '#f9fafb', padding: '8px 10px', borderRadius: 8, marginBottom: 10 }}>
+              📝 {delivery.order_notes}
+            </div>
+          )}
+
+          {/* Status progression: assigned -> accepted/rejected -> picked_up -> delivered/failed */}
+          {(!delivery.status || delivery.status === 'assigned') && (
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button onClick={() => onAccept(delivery)} disabled={busy}
+                style={{ ...btn, flex: 1, padding: '11px 0', background: '#22c55e', color: '#fff', fontSize: 13, opacity: busy ? 0.6 : 1 }}>
+                {busy ? '…' : '✓ Accept'}
+              </button>
+              <button onClick={() => onReject(delivery)} disabled={busy}
+                style={{ ...btn, flex: 1, padding: '11px 0', background: '#fef2f2', color: '#dc2626', fontSize: 13, opacity: busy ? 0.6 : 1 }}>
+                ✕ Reject
+              </button>
+            </div>
+          )}
+
+          {delivery.status === 'accepted' && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button onClick={() => onStatusUpdate(delivery.id, 'picked_up')} style={{ ...btn, background: '#f3f4f6', color: '#1a1a18' }}>
+                🏍️ Picked Up
+              </button>
+              <button onClick={() => onStatusUpdate(delivery.id, 'failed')} style={{ ...btn, background: '#ef4444', color: '#fff' }}>
+                ✕ Failed
+              </button>
+            </div>
+          )}
+
+          {delivery.status === 'picked_up' && (
+            <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+              <button onClick={() => onRequestPOD(delivery)} style={{ ...btn, background: '#22c55e', color: '#fff' }}>
+                ✓ Delivered
+              </button>
+              <button onClick={() => onStatusUpdate(delivery.id, 'failed')} style={{ ...btn, background: '#ef4444', color: '#fff' }}>
+                ✕ Failed
+              </button>
+            </div>
+          )}
+
+          {CLOSED_STATUSES.includes(delivery.status) && (
+            <div style={{ fontSize: 12, fontWeight: 700, color: st.color, background: st.bg, padding: '7px 10px', borderRadius: 6, display: 'inline-block' }}>
+              {delivery.status === 'delivered' ? '✓ Delivered' : delivery.status === 'failed' ? '✕ Failed' : delivery.status === 'rejected' ? `✕ Rejected${delivery.rejection_reason ? ` — ${delivery.rejection_reason}` : ''}` : '↩ Returned'}
+            </div>
+          )}
+
+          <button onClick={() => onPrint(delivery.order_id)} disabled={printingId === delivery.order_id}
+            style={{ ...btn, background: '#fff', color: '#1a1a18', border: '1px solid #e5e7eb', marginTop: 8, opacity: printingId === delivery.order_id ? 0.6 : 1 }}>
+            {printingId === delivery.order_id ? 'Preparing…' : '🖨️ Receipt'}
+          </button>
+        </div>
+      )}
+    </div>
+  );
+};
+
+const PortalDeliveries = () => {
   const { user } = useAuth();
-  const [rider, setRider] = useState(null);
   const [deliveries, setDeliveries] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [updating, setUpdating] = useState(null);
-  const [expanded, setExpanded] = useState(null);
-  const [activeTab, setActiveTab] = useState('active');
+  const [noRiderProfile, setNoRiderProfile] = useState(false);
+  const [busyId, setBusyId] = useState(null);
+  const [filter, setFilter] = useState('active');
+  const [podDelivery, setPodDelivery] = useState(null);
+  const [printOrder, setPrintOrder] = useState(null);
+  const [printingId, setPrintingId] = useState(null);
 
-  // Issue reporting modal
-  const [showIssue, setShowIssue] = useState(null);
-  const [issueType, setIssueType] = useState('failed');
-  const [failureReason, setFailureReason] = useState('Customer not home');
-  const [issueNotes, setIssueNotes] = useState('');
-
-  // Delivery proof modal
-  const [showProof, setShowProof] = useState(null);
-  const [proofNote, setProofNote] = useState('');
-
-  const fetchData = useCallback(async () => {
-    setLoading(true);
+  const fetchAll = useCallback(async () => {
     try {
-      const ridersRes = await ridersAPI.getAll({ limit: 200 });
-      const myRider = (ridersRes.data.riders || []).find(r => String(r.user_id) === String(user?.id));
-      setRider(myRider || null);
-      if (myRider) {
-        const res = await API.get(`/riders/${myRider.id}/deliveries`);
-        setDeliveries(res.data.deliveries || []);
+      const ridersRes = await ridersAPI.getAll();
+      // Resolving OUR OWN riders.id from OUR OWN users.id — these are two
+      // separate id spaces (riders has its own primary key, distinct from
+      // user_id), same distinction that mattered for the Scheduler fix.
+      const myRider = (ridersRes.data.riders || []).find(r => r.user_id === user?.id);
+      if (!myRider) {
+        setNoRiderProfile(true);
+        setDeliveries([]);
+        return;
       }
-    } catch (e) { console.error(e); }
-    setLoading(false);
-  }, [user]);
+      setNoRiderProfile(false);
+      const res = await ridersAPI.getDeliveries(myRider.id);
+      setDeliveries(res.data.deliveries || []);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.id]);
 
-  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    fetchAll();
+    const interval = setInterval(fetchAll, 30000);
+    return () => clearInterval(interval);
+  }, [fetchAll]);
 
-  const updateStatus = async (deliveryId, status, extra = {}) => {
-    setUpdating(deliveryId);
+  const handleAccept = async (delivery) => {
+    setBusyId(delivery.id);
+    try {
+      await ridersAPI.updateDeliveryStatus(delivery.id, { status: 'accepted' });
+      fetchAll();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Could not accept delivery');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleReject = async (delivery) => {
+    const reason = window.prompt('Why are you rejecting this delivery? (required)');
+    if (reason === null) return; // cancelled the prompt
+    if (!reason.trim()) {
+      alert('A reason is required to reject a delivery.');
+      return;
+    }
+    setBusyId(delivery.id);
+    try {
+      await ridersAPI.updateDeliveryStatus(delivery.id, { status: 'rejected', rejection_reason: reason.trim() });
+      fetchAll();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Could not reject delivery');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const handleStatusUpdate = async (deliveryId, status, extra = {}) => {
+    if (status !== 'delivered') {
+      const labels = { picked_up: 'picked up', failed: 'failed' };
+      if (!window.confirm(`Mark this delivery as ${labels[status]}?`)) return;
+    }
     try {
       await ridersAPI.updateDeliveryStatus(deliveryId, { status, ...extra });
-      fetchData();
-      setShowIssue(null);
-      setShowProof(null);
-      setIssueNotes('');
-      setProofNote('');
-    } catch (e) { console.error(e); }
-    setUpdating(null);
+      fetchAll();
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error updating delivery status');
+    }
   };
 
-  const sendWhatsAppReceipt = (d) => {
-    const phone = d.customer_phone?.replace(/\D/g, '');
-    const intl = phone?.startsWith('0') ? '233' + phone.slice(1) : phone;
-    const msg = `Hello ${d.customer_name}! Your order ${d.order_number} has been delivered. Amount: ${fmt(d.total_amount)}. Thank you for choosing Shorewinds! 🚲`;
-    window.open(`https://wa.me/${intl}?text=${encodeURIComponent(msg)}`, '_blank');
+  const handlePrint = async (orderId) => {
+    setPrintingId(orderId);
+    try {
+      const res = await ordersAPI.getOne(orderId);
+      setPrintOrder(res.data.order);
+      setTimeout(() => window.print(), 400);
+    } catch (err) {
+      alert('Could not load receipt');
+    } finally {
+      setPrintingId(null);
+    }
   };
 
-  const openMaps = (address) => {
-    window.open(`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(address)}`, '_blank');
-  };
+  const isActiveDelivery = (d) => !CLOSED_STATUSES.includes(d.status);
+  const filteredDeliveries = deliveries.filter(d => filter === 'active' ? isActiveDelivery(d) : true);
 
-  if (loading) return <div className="loading"><div className="loading-spinner" /><span className="loading-text">Loading…</span></div>;
+  if (loading) return (
+    <div style={{ display: 'flex', justifyContent: 'center', padding: '60px 0', color: '#9ca3af' }}>Loading…</div>
+  );
 
-  if (!rider) return (
-    <div style={{ textAlign: 'center', padding: 40 }}>
-      <div style={{ fontSize: 48, marginBottom: 16 }}>📦</div>
-      <p style={{ color: '#6b7280' }}>No rider profile linked.</p>
+  if (noRiderProfile) return (
+    <div style={{ textAlign: 'center', color: '#9ca3af', padding: '60px 16px' }}>
+      No rider profile is linked to your account — contact an admin to get set up.
     </div>
   );
 
-  const active = deliveries.filter(d => !['delivered', 'failed', 'returned', 'damaged'].includes(d.status));
-  const completed = deliveries.filter(d => d.status === 'delivered');
-  const issues = deliveries.filter(d => ['failed', 'returned', 'damaged'].includes(d.status));
-  const shown = activeTab === 'active' ? active : activeTab === 'completed' ? completed : issues;
-
   return (
-    <div>
-      <div style={{ marginBottom: 16 }}>
-        <h1 style={{ fontSize: 22, fontWeight: 700, color: '#1a1a18', margin: 0 }}>Deliveries</h1>
-        <p style={{ color: '#6b7280', fontSize: 13, margin: '4px 0 0' }}>Manage your deliveries and report issues</p>
-      </div>
+    <div style={{ paddingBottom: 24 }}>
+      <h1 style={{ fontSize: 20, fontWeight: 800, color: '#1a1a18', margin: '4px 0 16px' }}>Deliveries</h1>
 
-      {/* Stats row */}
-      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginBottom: 20 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
         {[
-          { label: 'Active', value: active.length, color: '#1d4ed8' },
-          { label: 'Delivered', value: completed.length, color: '#16a34a' },
-          { label: 'Issues', value: issues.length, color: '#dc2626' },
-        ].map(s => (
-          <div key={s.label} style={{ background: '#fff', borderRadius: 12, padding: '12px', textAlign: 'center', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-            <div style={{ fontSize: 22, fontWeight: 800, color: s.color }}>{s.value}</div>
-            <div style={{ fontSize: 11, color: '#6b7280', marginTop: 2 }}>{s.label}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* Tabs */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
-        {[
-          { key: 'active', label: `📦 Active (${active.length})` },
-          { key: 'completed', label: `✅ Done (${completed.length})` },
-          { key: 'issues', label: `⚠️ Issues (${issues.length})` },
-        ].map(tab => (
-          <button key={tab.key} onClick={() => setActiveTab(tab.key)} style={{
-            flex: 1, padding: '9px 4px', borderRadius: 10, border: 'none', cursor: 'pointer',
-            background: activeTab === tab.key ? '#1a1a18' : '#fff',
-            color: activeTab === tab.key ? '#fff' : '#6b7280',
-            fontSize: 11, fontWeight: 600,
-          }}>
-            {tab.label}
+          { key: 'active', label: `Active (${deliveries.filter(isActiveDelivery).length})` },
+          { key: 'all', label: `All (${deliveries.length})` },
+        ].map(t => (
+          <button key={t.key} onClick={() => setFilter(t.key)}
+            style={{
+              flex: 1, padding: '9px 0', borderRadius: 10, fontSize: 12, fontWeight: 700, cursor: 'pointer',
+              border: filter === t.key ? '1px solid #22c55e' : '1px solid #e5e7eb',
+              background: filter === t.key ? '#f0fdf4' : '#fff',
+              color: filter === t.key ? '#16a34a' : '#6b7280',
+            }}>
+            {t.label}
           </button>
         ))}
       </div>
 
-      {/* Deliveries list */}
-      {shown.length === 0 ? (
-        <div style={{ background: '#fff', borderRadius: 12, padding: 32, textAlign: 'center' }}>
-          <div style={{ fontSize: 40, marginBottom: 12 }}>
-            {activeTab === 'active' ? '🎉' : activeTab === 'completed' ? '📋' : '✅'}
-          </div>
-          <p style={{ color: '#6b7280', fontSize: 14, margin: 0 }}>
-            {activeTab === 'active' ? 'No active deliveries' : activeTab === 'completed' ? 'No completed deliveries' : 'No issues reported'}
-          </p>
+      {filteredDeliveries.length === 0 ? (
+        <div style={{ ...card, textAlign: 'center', color: '#9ca3af', padding: '40px 16px' }}>
+          {filter === 'active' ? 'No active deliveries right now.' : 'No deliveries yet.'}
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-          {shown.map(d => (
-            <div key={d.id} style={{ background: '#fff', borderRadius: 14, overflow: 'hidden', boxShadow: '0 1px 4px rgba(0,0,0,0.06)' }}>
-              {/* Card header */}
-              <div style={{ padding: '14px 16px', cursor: 'pointer' }} onClick={() => setExpanded(expanded === d.id ? null : d.id)}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
-                  <div>
-                    <div style={{ fontFamily: 'monospace', fontSize: 11, fontWeight: 700, color: '#6b7280' }}>{d.order_number}</div>
-                    <div style={{ fontSize: 15, fontWeight: 700, color: '#1a1a18', marginTop: 2 }}>{d.customer_name}</div>
-                    <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>📍 {d.delivery_address || d.customer_address || '—'}</div>
-                  </div>
-                  <div style={{ textAlign: 'right' }}>
-                    <StatusBadge status={d.status} />
-                    <div style={{ fontSize: 15, fontWeight: 700, color: '#22c55e', marginTop: 6 }}>{fmt(d.total_amount)}</div>
-                  </div>
-                </div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{
-                    fontSize: 11, fontWeight: 600, padding: '2px 8px', borderRadius: 6,
-                    background: d.payment_method === 'cod' ? '#fee2e2' : '#dcfce7',
-                    color: d.payment_method === 'cod' ? '#dc2626' : '#16a34a',
-                  }}>
-                    {d.payment_method === 'cod' ? '💵 COLLECT CASH' : '✅ PREPAID'}
-                  </span>
-                  <span style={{ fontSize: 12, color: '#9ca3af' }}>{expanded === d.id ? '▲' : '▼'}</span>
-                </div>
-              </div>
-
-              {/* Expanded */}
-              {expanded === d.id && (
-                <div style={{ padding: '0 16px 16px', borderTop: '1px solid #f3f4f6' }}>
-                  {/* Customer info */}
-                  <div style={{ background: '#f9f9f8', borderRadius: 10, padding: '12px 14px', margin: '12px 0' }}>
-                    <div style={{ fontSize: 13, fontWeight: 600, marginBottom: 6 }}>{d.customer_name}</div>
-                    <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-                      <a href={`tel:${d.customer_phone}`} style={{ fontSize: 13, color: '#22c55e', fontWeight: 600, textDecoration: 'none', background: '#f0fdf4', padding: '6px 12px', borderRadius: 8 }}>
-                        📞 Call
-                      </a>
-                      {(d.delivery_address || d.customer_address) && (
-                        <button onClick={() => openMaps(d.delivery_address || d.customer_address)} style={{ fontSize: 13, color: '#1d4ed8', fontWeight: 600, background: '#eff6ff', padding: '6px 12px', borderRadius: 8, border: 'none', cursor: 'pointer' }}>
-                          🗺️ Navigate
-                        </button>
-                      )}
-                    </div>
-                  </div>
-
-                  {/* Order items */}
-                  {d.items?.length > 0 && (
-                    <div style={{ marginBottom: 12 }}>
-                      <p style={{ fontSize: 11, fontWeight: 700, color: '#6b7280', textTransform: 'uppercase', margin: '0 0 8px' }}>Items</p>
-                      {d.items.map((item, i) => (
-                        <div key={i} style={{ display: 'flex', justifyContent: 'space-between', padding: '6px 0', borderBottom: i < d.items.length - 1 ? '1px solid #f3f4f6' : 'none', fontSize: 13 }}>
-                          <span>×{item.quantity} {item.product_name}</span>
-                          <span style={{ fontWeight: 600 }}>{fmt(item.total_price)}</span>
-                        </div>
-                      ))}
-                      <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 8, paddingTop: 8, borderTop: '2px solid #f3f4f6', fontWeight: 700, fontSize: 14 }}>
-                        <span>Total</span>
-                        <span style={{ color: '#22c55e' }}>{fmt(d.total_amount)}</span>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Issue details if reported */}
-                  {d.failure_reason && (
-                    <div style={{ background: '#fee2e2', borderRadius: 8, padding: '10px 12px', marginBottom: 12, fontSize: 13, color: '#dc2626' }}>
-                      <strong>Issue:</strong> {d.failure_reason}
-                      {d.delivery_notes && <div style={{ marginTop: 4 }}>📝 {d.delivery_notes}</div>}
-                    </div>
-                  )}
-
-                  {/* Proof note if delivered */}
-                  {d.proof_note && (
-                    <div style={{ background: '#f0fdf4', borderRadius: 8, padding: '10px 12px', marginBottom: 12, fontSize: 13, color: '#16a34a' }}>
-                      ✅ {d.proof_note}
-                    </div>
-                  )}
-
-                  {/* Action buttons */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {d.status === 'assigned' && (
-                      <button style={{ width: '100%', padding: 14, background: '#1d4ed8', color: '#fff', border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: 'pointer' }}
-                        onClick={() => updateStatus(d.id, 'picked_up')} disabled={updating === d.id}>
-                        {updating === d.id ? 'Updating…' : '📦 Mark as Picked Up'}
-                      </button>
-                    )}
-                    {d.status === 'picked_up' && (
-                      <button style={{ width: '100%', padding: 14, background: '#7c3aed', color: '#fff', border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: 'pointer' }}
-                        onClick={() => updateStatus(d.id, 'out_for_delivery')} disabled={updating === d.id}>
-                        {updating === d.id ? 'Updating…' : '🏍️ Out for Delivery'}
-                      </button>
-                    )}
-                    {d.status === 'out_for_delivery' && (
-                      <>
-                        <button style={{ width: '100%', padding: 14, background: '#16a34a', color: '#fff', border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: 'pointer' }}
-                          onClick={() => setShowProof(d)}>
-                          ✅ Mark as Delivered
-                        </button>
-                        <button style={{ width: '100%', padding: 14, background: '#fee2e2', color: '#dc2626', border: '1px solid #fca5a5', borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: 'pointer' }}
-                          onClick={() => { setShowIssue(d); setIssueType('failed'); }}>
-                          ⚠️ Report an Issue
-                        </button>
-                      </>
-                    )}
-                    {d.status === 'delivered' && (
-                      <button style={{ width: '100%', padding: 12, background: '#f0fdf4', color: '#16a34a', border: '1px solid #bbf7d0', borderRadius: 12, fontSize: 14, fontWeight: 600, cursor: 'pointer' }}
-                        onClick={() => sendWhatsAppReceipt(d)}>
-                        💬 Send WhatsApp Receipt
-                      </button>
-                    )}
-                  </div>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
+        filteredDeliveries
+          .sort((a, b) => new Date(b.assigned_at) - new Date(a.assigned_at))
+          .map(delivery => (
+            <DeliveryCard
+              key={delivery.id}
+              delivery={delivery}
+              onAccept={handleAccept}
+              onReject={handleReject}
+              onStatusUpdate={handleStatusUpdate}
+              onRequestPOD={setPodDelivery}
+              onPrint={handlePrint}
+              printingId={printingId}
+              busy={busyId === delivery.id}
+            />
+          ))
       )}
 
-      {/* Proof of delivery modal */}
-      {showProof && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 300, display: 'flex', alignItems: 'flex-end' }}>
-          <div style={{ background: '#fff', borderRadius: '20px 20px 0 0', width: '100%', maxWidth: 480, margin: '0 auto', padding: 24 }}>
-            <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 700 }}>Confirm Delivery</h3>
-            <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 16px' }}>Add a note about the delivery (optional)</p>
-            <input
-              className="form-input"
-              placeholder="e.g. Left with security, Customer received in person…"
-              value={proofNote}
-              onChange={e => setProofNote(e.target.value)}
-              style={{ marginBottom: 16 }}
-            />
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={() => setShowProof(null)} style={{ flex: 1, padding: 14, background: '#f3f4f6', border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>
-                Cancel
-              </button>
-              <button
-                onClick={() => updateStatus(showProof.id, 'delivered', { proof_note: proofNote })}
-                disabled={updating === showProof.id}
-                style={{ flex: 2, padding: 14, background: '#16a34a', color: '#fff', border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: 'pointer' }}
-              >
-                {updating === showProof.id ? 'Saving…' : '✅ Confirm Delivered'}
-              </button>
-            </div>
-          </div>
-        </div>
+      {podDelivery && (
+        <PODModal
+          delivery={podDelivery}
+          onClose={() => setPodDelivery(null)}
+          onConfirm={async (extra) => {
+            await handleStatusUpdate(podDelivery.id, 'delivered', extra);
+            setPodDelivery(null);
+          }}
+        />
       )}
 
-      {/* Issue reporting modal */}
-      {showIssue && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 300, display: 'flex', alignItems: 'flex-end' }}>
-          <div style={{ background: '#fff', borderRadius: '20px 20px 0 0', width: '100%', maxWidth: 480, margin: '0 auto', padding: 24, maxHeight: '80vh', overflowY: 'auto' }}>
-            <h3 style={{ margin: '0 0 8px', fontSize: 18, fontWeight: 700 }}>Report Issue</h3>
-            <p style={{ fontSize: 13, color: '#6b7280', margin: '0 0 16px' }}>{showIssue.order_number} — {showIssue.customer_name}</p>
-
-            <p style={{ fontSize: 13, fontWeight: 600, margin: '0 0 8px' }}>Issue Type</p>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 16 }}>
-              {ISSUE_TYPES.map(type => (
-                <button key={type.key} onClick={() => setIssueType(type.key)} style={{
-                  padding: '12px 16px', borderRadius: 10, border: `2px solid ${issueType === type.key ? type.color : '#f3f4f6'}`,
-                  background: issueType === type.key ? type.color + '15' : '#fff',
-                  color: issueType === type.key ? type.color : '#6b7280',
-                  fontSize: 14, fontWeight: 600, cursor: 'pointer', textAlign: 'left',
-                }}>
-                  {type.label}
-                </button>
-              ))}
-            </div>
-
-            <p style={{ fontSize: 13, fontWeight: 600, margin: '0 0 8px' }}>Reason</p>
-            <select className="form-input" value={failureReason} onChange={e => setFailureReason(e.target.value)} style={{ marginBottom: 12 }}>
-              {FAILURE_REASONS.map(r => <option key={r} value={r}>{r}</option>)}
-            </select>
-
-            <p style={{ fontSize: 13, fontWeight: 600, margin: '0 0 8px' }}>Additional Notes</p>
-            <textarea
-              className="form-input"
-              rows={3}
-              placeholder="Any additional details about the issue…"
-              value={issueNotes}
-              onChange={e => setIssueNotes(e.target.value)}
-              style={{ marginBottom: 16, resize: 'none' }}
-            />
-
-            <div style={{ display: 'flex', gap: 10 }}>
-              <button onClick={() => setShowIssue(null)} style={{ flex: 1, padding: 14, background: '#f3f4f6', border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 600, cursor: 'pointer' }}>
-                Cancel
-              </button>
-              <button
-                onClick={() => updateStatus(showIssue.id, issueType, { failure_reason: failureReason, issue_type: issueType, delivery_notes: issueNotes })}
-                disabled={updating === showIssue.id}
-                style={{ flex: 2, padding: 14, background: '#dc2626', color: '#fff', border: 'none', borderRadius: 12, fontSize: 15, fontWeight: 700, cursor: 'pointer' }}
-              >
-                {updating === showIssue.id ? 'Saving…' : 'Submit Issue Report'}
-              </button>
-            </div>
-          </div>
+      {printOrder && (
+        <div className="print-only">
+          <ReceiptDocument order={printOrder} />
         </div>
       )}
     </div>
   );
-}
+};
+
+export default PortalDeliveries;

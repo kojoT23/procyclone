@@ -1,3 +1,5 @@
+const pool = require('./db');
+
 const ROLES = {
   super_admin: {
     label: 'Super Admin',
@@ -97,13 +99,32 @@ const hasPermission = (role, permission, overrides = {}) => {
   return ROLES[role].permissions.includes(permission);
 };
 
+/* ── FIX: can() previously called hasPermission(role, permission) with
+   NO overrides argument, so every toggle made on the RBAC settings page
+   (stored in role_permissions) was silently ignored — the UI would save
+   successfully but never actually change access. This version looks up
+   any override for this specific role+permission pair before deciding,
+   so a saved toggle now actually takes effect. ── */
 const can = (permission) => {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     if (!req.user) return res.status(401).json({ success: false, message: 'Not authenticated' });
-    if (!hasPermission(req.user.role, permission)) {
-      return res.status(403).json({ success: false, message: `Access denied. Required: ${permission}` });
+    try {
+      const overrideResult = await pool.query(
+        'SELECT granted FROM role_permissions WHERE role = $1 AND permission = $2',
+        [req.user.role, permission]
+      );
+      const overrides = overrideResult.rows.length > 0
+        ? { [req.user.role]: { [permission]: overrideResult.rows[0].granted } }
+        : {};
+
+      if (!hasPermission(req.user.role, permission, overrides)) {
+        return res.status(403).json({ success: false, message: `Access denied. Required: ${permission}` });
+      }
+      next();
+    } catch (error) {
+      console.error('can() permission check error:', error);
+      res.status(500).json({ success: false, message: 'Server error' });
     }
-    next();
   };
 };
 

@@ -7,6 +7,11 @@ const {
   archiveAndReset,
   getResetLogs,
 } = require('../controllers/settingsController');
+const {
+  getPortalAccessList,
+  grantPortalAccess,
+  revokePortalAccess,
+} = require('../controllers/portalAccessController');
 const { protect, authorize } = require('../middleware/auth');
 
 /* All settings routes require authentication */
@@ -15,6 +20,14 @@ router.use(protect);
 /* ── Stats & logs (admin + super_admin) ──────────────────────── */
 router.get('/stats',      authorize('super_admin', 'admin'), getSystemStats);
 router.get('/reset-logs', authorize('super_admin', 'admin'), getResetLogs);
+
+/* ── Staff portal access (super_admin ONLY) ──────────────────────
+   Mirrors how riders.user_id links a login to a rider profile —
+   here, a row in staff_portal_access lets an admin/manager/
+   super_admin user into the mobile portal at all. ──────────────── */
+router.get('/portal-access',            authorize('super_admin'), getPortalAccessList);
+router.post('/portal-access/:userId',   authorize('super_admin'), grantPortalAccess);
+router.delete('/portal-access/:userId', authorize('super_admin'), revokePortalAccess);
 
 /* ── Reset actions ───────────────────────────────────────────── */
 

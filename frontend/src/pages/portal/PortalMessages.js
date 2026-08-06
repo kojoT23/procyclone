@@ -123,7 +123,12 @@ export default function PortalMessages() {
         const convs = convsRes.data.conversations || [];
         setConversations(convs);
         const fullConv = convs.find(c => c.id === res.data.conversation.id);
-        openConversation(fullConv || res.data.conversation);
+        openConversation(fullConv || {
+          ...res.data.conversation,
+          other_id: staffMember.id,
+          other_name: staffMember.name,
+          other_role: staffMember.role,
+        });
       }
     } catch (e) { console.error(e); }
   };

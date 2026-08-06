@@ -479,4 +479,6 @@ const Receipts = () => {
   );
 };
 
+export { ReceiptDocument };
+
 export default Receipts;

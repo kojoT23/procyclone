@@ -108,6 +108,20 @@ const Cash = () => {
     catch { alert('Error disputing cash log'); }
   };
 
+  const handleResolve = async (id) => {
+  const resolution_notes = window.prompt('Resolution notes (e.g. how the shortfall was made up):');
+  if (resolution_notes === null) return; // cancelled
+  const amountInput = window.prompt('Final reconciled amount, if different from what was logged (leave blank to skip):');
+  const resolved_amount = amountInput ? parseFloat(amountInput) : undefined;
+  try {
+    await cashAPI.resolve(id, { resolution_notes, resolved_amount });
+    fetchLogs();
+  } catch (err) {
+    alert(err.response?.data?.message || 'Error resolving dispute');
+  }
+};
+
+
   const handleSave = async () => {
     if (!va(form)) return;
     try {
@@ -155,6 +169,7 @@ const Cash = () => {
   const StatusBadge = ({ status }) => {
     const cls = status === 'verified' ? 'badge badge-green'
               : status === 'disputed' ? 'badge badge-red'
+              : status === 'resolved' ? 'badge badge-blue'
               : 'badge badge-amber';
     return <span className={cls}>{status}</span>;
   };
@@ -296,7 +311,21 @@ const Cash = () => {
                               </>
                             )}
                             {log.status === 'verified' && <span className="badge badge-green">✓ Verified</span>}
-                            {log.status === 'disputed' && <span className="badge badge-red">⚠ Disputed</span>}
+                            {log.status === 'disputed' && (
+                              <>
+                                <span className="badge badge-red">⚠ Disputed</span>
+                                {log.resolving_log_id && (
+                                  <span
+                                    className="badge badge-blue"
+                                    title={`Rider logged GH₵${parseFloat(log.resolving_log_amount || 0).toFixed(2)} against this dispute — confirm the cash before resolving`}
+                                  >
+                                    💳 GH₵{parseFloat(log.resolving_log_amount || 0).toFixed(2)} logged
+                                  </span>
+                                )}
+                                <button className="btn btn-primary btn-sm" onClick={() => handleResolve(log.id)}>✓ Resolve</button>
+                              </>
+                            )}
+                            {log.status === 'resolved' && <span className="badge badge-blue">✓ Resolved</span>}
                           </div>
                         </td>
                       </tr>

@@ -18,6 +18,16 @@ const DeliveryPricingTab = ({ currentUser }) => {
     max_manual_discount: '0',
     max_manual_discount_type: 'fixed',
     surcharge_overlap_mode: 'highest',
+    default_import_duty_pct: '20',
+    default_ecowas_levy_pct: '0.5',
+    default_au_levy_pct: '0.2',
+    default_exim_levy_pct: '0.75',
+    default_processing_fee_pct: '1',
+    default_vat_pct: '15',
+    default_nhil_pct: '2.5',
+    default_getfund_pct: '2.5',
+    default_clearing_agent_pct: '0',
+    default_clearing_agent_min: '0',
   });
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSaved,  setSettingsSaved]  = useState(false);
@@ -59,6 +69,16 @@ const DeliveryPricingTab = ({ currentUser }) => {
         max_manual_discount: String(s.max_manual_discount ?? '0'),
         max_manual_discount_type: s.max_manual_discount_type || 'fixed',
         surcharge_overlap_mode: s.surcharge_overlap_mode || 'highest',
+        default_import_duty_pct: String(s.default_import_duty_pct ?? '20'),
+        default_ecowas_levy_pct: String(s.default_ecowas_levy_pct ?? '0.5'),
+        default_au_levy_pct: String(s.default_au_levy_pct ?? '0.2'),
+        default_exim_levy_pct: String(s.default_exim_levy_pct ?? '0.75'),
+        default_processing_fee_pct: String(s.default_processing_fee_pct ?? '1'),
+        default_vat_pct: String(s.default_vat_pct ?? '15'),
+        default_nhil_pct: String(s.default_nhil_pct ?? '2.5'),
+        default_getfund_pct: String(s.default_getfund_pct ?? '2.5'),
+        default_clearing_agent_pct: String(s.default_clearing_agent_pct ?? '0'),
+        default_clearing_agent_min: String(s.default_clearing_agent_min ?? '0'),
       });
       setZones(zonesRes.data.zones || []);
       setSurchargeRules(surchargeRes.data.rules || []);
@@ -110,6 +130,16 @@ const DeliveryPricingTab = ({ currentUser }) => {
         max_manual_discount: parseFloat(settings.max_manual_discount),
         max_manual_discount_type: settings.max_manual_discount_type,
         surcharge_overlap_mode: settings.surcharge_overlap_mode,
+        default_import_duty_pct: parseFloat(settings.default_import_duty_pct) || 0,
+        default_ecowas_levy_pct: parseFloat(settings.default_ecowas_levy_pct) || 0,
+        default_au_levy_pct: parseFloat(settings.default_au_levy_pct) || 0,
+        default_exim_levy_pct: parseFloat(settings.default_exim_levy_pct) || 0,
+        default_processing_fee_pct: parseFloat(settings.default_processing_fee_pct) || 0,
+        default_vat_pct: parseFloat(settings.default_vat_pct) || 0,
+        default_nhil_pct: parseFloat(settings.default_nhil_pct) || 0,
+        default_getfund_pct: parseFloat(settings.default_getfund_pct) || 0,
+        default_clearing_agent_pct: parseFloat(settings.default_clearing_agent_pct) || 0,
+        default_clearing_agent_min: parseFloat(settings.default_clearing_agent_min) || 0,
       });
       setSettingsSaved(true);
     } catch (err) {
@@ -440,6 +470,80 @@ const DeliveryPricingTab = ({ currentUser }) => {
             </div>
           )}
         </form>
+      </div>
+
+      {/* ══════════════════ Card 1b: Ghana Duty & Levy Defaults ══════════════════ */}
+      <div className="card">
+        <h3 style={{ fontSize: '15px', fontWeight: '700', margin: '0 0 4px' }}>Ghana Duty & Levy Defaults</h3>
+        <p style={{ color: 'var(--text-2)', fontSize: '13px', margin: '0 0 16px' }}>
+          Pre-fills the duty estimator on every new shipment. Rates follow GRA's current schedule (post the Jan 2026 VAT Act reform) — override any of these per shipment if GRA updates them, or if a specific HS code differs.
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">Import Duty %</label>
+            <input className="form-input" type="number" step="0.1" value={settings.default_import_duty_pct}
+              onChange={handleSettingsChange('default_import_duty_pct')} disabled={!isSuperAdmin} />
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">ECOWAS Levy %</label>
+            <input className="form-input" type="number" step="0.1" value={settings.default_ecowas_levy_pct}
+              onChange={handleSettingsChange('default_ecowas_levy_pct')} disabled={!isSuperAdmin} />
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">AU Levy %</label>
+            <input className="form-input" type="number" step="0.1" value={settings.default_au_levy_pct}
+              onChange={handleSettingsChange('default_au_levy_pct')} disabled={!isSuperAdmin} />
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">EXIM Levy %</label>
+            <input className="form-input" type="number" step="0.1" value={settings.default_exim_levy_pct}
+              onChange={handleSettingsChange('default_exim_levy_pct')} disabled={!isSuperAdmin} />
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">Processing Fee %</label>
+            <input className="form-input" type="number" step="0.1" value={settings.default_processing_fee_pct}
+              onChange={handleSettingsChange('default_processing_fee_pct')} disabled={!isSuperAdmin} />
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">VAT %</label>
+            <input className="form-input" type="number" step="0.1" value={settings.default_vat_pct}
+              onChange={handleSettingsChange('default_vat_pct')} disabled={!isSuperAdmin} />
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">NHIL %</label>
+            <input className="form-input" type="number" step="0.1" value={settings.default_nhil_pct}
+              onChange={handleSettingsChange('default_nhil_pct')} disabled={!isSuperAdmin} />
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">GETFund %</label>
+            <input className="form-input" type="number" step="0.1" value={settings.default_getfund_pct}
+              onChange={handleSettingsChange('default_getfund_pct')} disabled={!isSuperAdmin} />
+          </div>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '12px' }}>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">Clearing Agent Fee %</label>
+            <input className="form-input" type="number" step="0.1" value={settings.default_clearing_agent_pct}
+              onChange={handleSettingsChange('default_clearing_agent_pct')} disabled={!isSuperAdmin} />
+          </div>
+          <div className="form-group" style={{ margin: 0 }}>
+            <label className="form-label">Clearing Agent Min (GH₵)</label>
+            <input className="form-input" type="number" step="0.01" value={settings.default_clearing_agent_min}
+              onChange={handleSettingsChange('default_clearing_agent_min')} disabled={!isSuperAdmin} />
+          </div>
+        </div>
+        <div className="alert alert-info" style={{ fontSize: '12px' }}>
+          VAT, NHIL, and GETFund are each applied to the same duty-inclusive value and summed (not compounded) — per GRA's Jan 2026 reform. Import Duty % varies by HS code band (0/5/10/20/35%); the value here is just the starting default.
+        </div>
+        {isSuperAdmin && (
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '12px' }}>
+            <button type="button" className="btn btn-primary" disabled={settingsSaving} onClick={handleSettingsSave}>
+              {settingsSaving ? 'Saving…' : 'Save Settings'}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* ══════════════════ Card 2: Delivery Zones ══════════════════ */}

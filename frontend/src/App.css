@@ -302,6 +302,8 @@ a { color: inherit; text-decoration: none; }
 ═══════════════════════════════════════════════════════════════ */
 .table-wrapper {
   overflow-x: auto;
+  overflow-y: auto;
+  max-height: 560px;
   -webkit-overflow-scrolling: touch;
   border-radius: var(--radius);
   border: 1px solid var(--border-2);
@@ -316,6 +318,9 @@ table {
 thead tr {
   background: var(--bg);
   border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 1;
 }
 
 th {
@@ -1080,13 +1085,20 @@ textarea.form-input {
   th, td { border: 1px solid #ddd; padding: 6px 8px; font-size: 11px; }
 }
 
+/* ── Table-wrap: contains wide tables (Expenses, Imports, etc.) so they
+   scroll horizontally inside their own card instead of spilling past its
+   rounded edge. Previously this only existed inside the 768px mobile
+   media query below — meaning on desktop, any page reusing this class
+   (like Imports' 9-column table) had zero overflow handling at all and
+   just overflowed the card outright. ── */
+.expenses-table-wrap {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: var(--radius-lg);
+}
+
 /* ── Expenses page mobile fixes ─────────────────────────────── */
 @media (max-width: 768px) {
-  .expenses-table-wrap {
-    overflow-x: auto;
-    -webkit-overflow-scrolling: touch;
-    border-radius: 8px;
-  }
   .expenses-table-wrap table {
     min-width: 600px;
   }

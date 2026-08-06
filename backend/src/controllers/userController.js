@@ -21,13 +21,16 @@ const updateUserValidation = [
 
 const getUsers = async (req, res) => {
   try {
-    const { role, search, page = 1, limit = 20 } = req.query;
+    const { role, search, is_active, page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
     const conditions = [];
     const values = [];
     let i = 1;
 
     if (role) { conditions.push(`role = $${i++}`); values.push(role); }
+    if (is_active === 'true' || is_active === 'false') {
+      conditions.push(`is_active = $${i++}`); values.push(is_active === 'true');
+    }
     if (search) {
       conditions.push(`(name ILIKE $${i} OR email ILIKE $${i} OR phone ILIKE $${i})`);
       values.push(`%${search}%`); i++;
@@ -87,11 +90,18 @@ const createUser = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
+    // customer_support accounts start inactive and require an explicit
+    // super_admin approval (via the existing toggleUserStatus endpoint)
+    // before they can log in — authController.login already rejects
+    // is_active=false with a clear "awaiting approval" message. Every
+    // other role keeps today's behavior of being active immediately.
+    const isActive = role !== 'customer_support';
+
     const result = await pool.query(
-      `INSERT INTO users (name, email, password, role, phone)
-       VALUES ($1, $2, $3, $4, $5)
+      `INSERT INTO users (name, email, password, role, phone, is_active)
+       VALUES ($1, $2, $3, $4, $5, $6)
        RETURNING id, name, email, role, phone, is_active, created_at`,
-      [name, email, hashedPassword, role, phone]
+      [name, email, hashedPassword, role, phone, isActive]
     );
 
     // Auto-create rider profile if role is rider
@@ -102,9 +112,13 @@ const createUser = async (req, res) => {
       );
     }
 
+    const message = role === 'customer_support'
+      ? `${ROLES[role].label} account created — awaiting Super Admin approval before they can log in.`
+      : `${ROLES[role].label} account created successfully`;
+
     res.status(201).json({
       success: true,
-      message: `${ROLES[role].label} account created successfully`,
+      message,
       user: result.rows[0],
     });
   } catch (error) {

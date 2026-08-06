@@ -38,6 +38,11 @@ const ProfileCard = ({ user, onEdit, onDelete, onToggle, currentUser }) => {
   const isSelf       = user.id === currentUser?.id;
   const isSuperAdmin = currentUser?.role === 'super_admin';
   const initials     = user.name?.split(' ').map(n => n[0]).join('').slice(0, 2).toUpperCase();
+  // A customer_support account that's inactive is presumed pending
+  // approval (that's the only way it gets created inactive) rather than
+  // deliberately deactivated — shown distinctly so it doesn't get mistaken
+  // for a disabled account when a super_admin is scanning the list.
+  const isPendingApproval = !user.is_active && user.role === 'customer_support';
 
   return (
     <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 0, padding: 0, overflow: 'hidden' }}>
@@ -74,8 +79,8 @@ const ProfileCard = ({ user, onEdit, onDelete, onToggle, currentUser }) => {
               {user.role?.replace('_', ' ')}
             </span>
           </div>
-          <span className={`badge ${user.is_active ? 'badge-green' : 'badge-red'}`} style={{ flexShrink: 0 }}>
-            {user.is_active ? 'Active' : 'Inactive'}
+          <span className={`badge ${user.is_active ? 'badge-green' : isPendingApproval ? 'badge-amber' : 'badge-red'}`} style={{ flexShrink: 0 }}>
+            {user.is_active ? 'Active' : isPendingApproval ? '⏳ Pending Approval' : 'Inactive'}
           </span>
         </div>
 
@@ -134,10 +139,10 @@ const ProfileCard = ({ user, onEdit, onDelete, onToggle, currentUser }) => {
           <button className="btn btn-secondary btn-sm" onClick={() => onEdit(user)}>✏️ Edit</button>
           {!isSelf && isSuperAdmin && (
             <button
-              className={`btn btn-sm ${user.is_active ? 'btn-warning' : 'btn-success'}`}
+              className={`btn btn-sm ${user.is_active ? 'btn-warning' : isPendingApproval ? 'btn-primary' : 'btn-success'}`}
               onClick={() => onToggle(user)}
             >
-              {user.is_active ? 'Deactivate' : 'Activate'}
+              {user.is_active ? 'Deactivate' : isPendingApproval ? '✓ Approve' : 'Activate'}
             </button>
           )}
           {!isSelf && isSuperAdmin && (
@@ -163,6 +168,7 @@ const Staff = () => {
   const [pages,      setPages]      = useState(1);
   const [search,     setSearch]     = useState('');
   const [filterRole, setFilterRole] = useState('');
+  const [pendingOnly, setPendingOnly] = useState(false);
   const [viewMode,   setViewMode]   = useState('cards'); // 'cards' | 'table'
 
   /* Modal */
@@ -189,8 +195,13 @@ const Staff = () => {
     try {
       setLoading(true);
       const params = { page, limit: 20 };
-      if (search)     params.search = search;
-      if (filterRole) params.role   = filterRole;
+      if (pendingOnly) {
+        params.role = 'customer_support';
+        params.is_active = 'false';
+      } else if (filterRole) {
+        params.role = filterRole;
+      }
+      if (search) params.search = search;
       const res = await usersAPI.getAll(params);
       setUsers(res.data.users || []);
       setTotal(res.data.total || 0);
@@ -200,10 +211,10 @@ const Staff = () => {
     } finally {
       setLoading(false);
     }
-  }, [page, search, filterRole]);
+  }, [page, search, filterRole, pendingOnly]);
 
   useEffect(() => { fetchUsers(); }, [fetchUsers]);
-  useEffect(() => { setPage(1); },  [search, filterRole]);
+  useEffect(() => { setPage(1); },  [search, filterRole, pendingOnly]);
 
   /* ── Open add / edit ────────────────────────────────────────── */
   const openAdd = () => {
@@ -275,7 +286,8 @@ const Staff = () => {
 
   /* ── Toggle ──────────────────────────────────────────────────── */
   const handleToggle = async (user) => {
-    const action = user.is_active ? 'Deactivate' : 'Activate';
+    const isPendingApproval = !user.is_active && user.role === 'customer_support';
+    const action = user.is_active ? 'Deactivate' : isPendingApproval ? 'Approve' : 'Activate';
     if (!window.confirm(`${action} ${user.name}?`)) return;
     try {
       await usersAPI.toggle(user.id);
@@ -356,15 +368,24 @@ const Staff = () => {
             className="form-input"
             style={{ width: 'auto', minWidth: '140px' }}
             value={filterRole}
-            onChange={e => setFilterRole(e.target.value)}
+            onChange={e => { setFilterRole(e.target.value); setPendingOnly(false); }}
+            disabled={pendingOnly}
           >
             <option value="">All roles</option>
             {ROLES.map(r => (
               <option key={r} value={r}>{r.replace('_', ' ')}</option>
             ))}
           </select>
-          {(search || filterRole) && (
-            <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(''); setFilterRole(''); }}>
+          {isSuperAdmin && (
+            <button
+              className={`btn btn-sm ${pendingOnly ? 'btn-primary' : 'btn-secondary'}`}
+              onClick={() => { setPendingOnly(p => !p); setFilterRole(''); }}
+            >
+              ⏳ Pending Approval
+            </button>
+          )}
+          {(search || filterRole || pendingOnly) && (
+            <button className="btn btn-secondary btn-sm" onClick={() => { setSearch(''); setFilterRole(''); setPendingOnly(false); }}>
               Clear
             </button>
           )}

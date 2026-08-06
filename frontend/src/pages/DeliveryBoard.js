@@ -13,9 +13,10 @@ const deliveryAPI = {
 /* ─── Status config ───────────────────────────────────────────── */
 const STATUS = {
   pending:          { label: 'Pending',        color: '#f59e0b', bg: '#fffbeb', border: '#fde68a' },
-  confirmed:        { label: 'Confirmed',      color: '#3b82f6', bg: '#eff6ff', border: '#bfdbfe' },
+  confirmed:        { label: 'Assigned',       color: '#14b8a6', bg: '#f0fdfa', border: '#99f6e4' },
   packing:          { label: 'Packing',        color: '#8b5cf6', bg: '#f5f3ff', border: '#ddd6fe' },
   assigned:         { label: 'Assigned',       color: '#14b8a6', bg: '#f0fdfa', border: '#99f6e4' },
+  processing:       { label: 'Picked Up',      color: '#0891b2', bg: '#ecfeff', border: '#a5f3fc' },
   out_for_delivery: { label: 'Out for Delivery', color: '#f97316', bg: '#fff7ed', border: '#fed7aa' },
   delivered:        { label: 'Delivered',      color: '#22c55e', bg: '#f0fdf4', border: '#bbf7d0' },
   failed:           { label: 'Failed',         color: '#ef4444', bg: '#fef2f2', border: '#fecaca' },
@@ -35,7 +36,7 @@ const timeAgo = (date) => {
 const fmt = (n) => `GH₵ ${parseFloat(n || 0).toFixed(2)}`;
 
 /* ─── Order card ──────────────────────────────────────────────── */
-const OrderCard = ({ order, riders, onAssign, onStatusUpdate, assigning }) => {
+const OrderCard = ({ order, riders, onAssign, onStatusUpdate, onViewProof, assigning }) => {
   const [expanded, setExpanded]     = useState(false);
   const [selectedRider, setSelectedRider] = useState('');
   const st = STATUS[order.status] || STATUS.pending;
@@ -148,9 +149,18 @@ const OrderCard = ({ order, riders, onAssign, onStatusUpdate, assigning }) => {
             </div>
           )}
 
-          {/* Assign rider — show for unassigned pending/confirmed/packing */}
-          {['pending', 'confirmed', 'packing'].includes(order.status) && (
+          {/* Assign rider — show when no delivery exists yet, or the last
+              one was rejected and this order needs a new rider. Checking
+              order.status alone isn't reliable here: assignDelivery sets it
+              to 'confirmed' (not 'assigned'), so gating on a status string
+              silently breaks the moment that value doesn't match exactly. */}
+          {(!order.delivery_id || order.delivery_status === 'rejected') && !['delivered', 'failed', 'out_for_delivery'].includes(order.status) && (
             <div style={{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
+              {order.delivery_status === 'rejected' && (
+                <div style={{ width: '100%', fontSize: '12px', color: '#dc2626', fontWeight: 600, marginBottom: 4 }}>
+                  ⚠️ Rejected by previous rider{order.rejection_reason ? `: ${order.rejection_reason}` : ''} — needs reassignment
+                </div>
+              )}
               <select
                 className="form-input"
                 style={{ flex: 1, fontSize: '13px' }}
@@ -179,10 +189,11 @@ const OrderCard = ({ order, riders, onAssign, onStatusUpdate, assigning }) => {
             </div>
           )}
 
-          {/* Update delivery status — show for assigned/out_for_delivery */}
-          {['assigned', 'out_for_delivery'].includes(order.status) && order.delivery_id && (
+          {/* Update delivery status — show once a delivery exists and
+              hasn't been rejected, closed out, or already delivered/failed. */}
+          {order.delivery_id && order.delivery_status !== 'rejected' && !['delivered', 'failed', 'returned'].includes(order.status) && (
             <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-              {order.status === 'assigned' && (
+              {order.status === 'confirmed' && (
                 <button
                   className="btn btn-secondary btn-sm"
                   onClick={() => onStatusUpdate(order.delivery_id, 'picked_up')}
@@ -207,14 +218,24 @@ const OrderCard = ({ order, riders, onAssign, onStatusUpdate, assigning }) => {
 
           {/* Delivered / failed — final state */}
           {['delivered', 'failed', 'returned'].includes(order.status) && (
-            <div style={{
-              fontSize: '12px', fontWeight: '600',
-              color: order.status === 'delivered' ? '#15803d' : '#dc2626',
-              padding: '6px 10px', borderRadius: '6px',
-              background: order.status === 'delivered' ? '#dcfce7' : '#fee2e2',
-              display: 'inline-block',
-            }}>
-              {order.status === 'delivered' ? '✓ Delivered' : '✕ Failed / Returned'}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <div style={{
+                fontSize: '12px', fontWeight: '600',
+                color: order.status === 'delivered' ? '#15803d' : '#dc2626',
+                padding: '6px 10px', borderRadius: '6px',
+                background: order.status === 'delivered' ? '#dcfce7' : '#fee2e2',
+                display: 'inline-block',
+              }}>
+                {order.status === 'delivered' ? '✓ Delivered' : '✕ Failed / Returned'}
+              </div>
+              {/* Only delivered orders can have a proof photo — the mobile
+                  POD flow only captures one on the 'delivered' transition,
+                  not on 'failed'. */}
+              {order.status === 'delivered' && (
+                <button className="btn btn-secondary btn-sm" onClick={() => onViewProof(order.id)}>
+                  📷 View Proof
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -233,6 +254,8 @@ const DeliveryBoard = () => {
   const [assigning, setAssigning] = useState(null);
   const [filter,    setFilter]    = useState('active'); // active | all | unassigned
   const [lastRefresh, setLastRefresh] = useState(null);
+  const [proofOrder, setProofOrder] = useState(null);
+  const [loadingProof, setLoadingProof] = useState(false);
 
   /* ── Fetch ─────────────────────────────────────────────────── */
   const fetchAll = useCallback(async () => {
@@ -283,6 +306,19 @@ const DeliveryBoard = () => {
     }
   };
 
+  /* ── View delivery proof ───────────────────────────────────── */
+  const handleViewProof = async (orderId) => {
+    setLoadingProof(true);
+    try {
+      const res = await ordersAPI.getProof(orderId);
+      setProofOrder({ order_number: orders.find(o => o.id === orderId)?.order_number, ...res.data.proof });
+    } catch (err) {
+      alert(err.response?.data?.message || 'Could not load delivery proof');
+    } finally {
+      setLoadingProof(false);
+    }
+  };
+
   /* ── Reset all rider availability ────────────────────────────── */
   const handleResetAvailability = async () => {
     if (!window.confirm('Reset ALL riders to available? Only do this if deliveries are complete.')) return;
@@ -296,17 +332,22 @@ const DeliveryBoard = () => {
   };
 
   /* ── Derived ───────────────────────────────────────────────── */
-  const activeStatuses   = ['pending', 'confirmed', 'packing', 'assigned', 'out_for_delivery'];
+  const activeStatuses   = ['pending', 'confirmed', 'packing', 'processing', 'out_for_delivery'];
   const availableRiders  = riders.filter(r => r.is_available);
   const busyRiders       = riders.filter(r => !r.is_available);
-  const unassignedOrders = orders.filter(o => ['pending', 'confirmed', 'packing'].includes(o.status));
+  // "Unassigned" means no live delivery, or the last one was rejected —
+  // not a fixed list of order.status values, since assignDelivery sets
+  // status to 'confirmed' (already assigned) rather than leaving it
+  // 'pending', and a rejection can send an order back into this pool too.
+  const isUnassigned     = (o) => !o.delivery_id || o.delivery_status === 'rejected';
+  const unassignedOrders = orders.filter(isUnassigned);
   const outOrders        = orders.filter(o => o.status === 'out_for_delivery');
   const deliveredToday   = orders.filter(o => o.status === 'delivered');
   const failedToday      = orders.filter(o => o.status === 'failed');
 
   const filteredOrders = orders.filter(o => {
     if (filter === 'active')     return activeStatuses.includes(o.status);
-    if (filter === 'unassigned') return ['pending', 'confirmed', 'packing'].includes(o.status);
+    if (filter === 'unassigned') return isUnassigned(o);
     return true;
   });
 
@@ -439,6 +480,7 @@ const DeliveryBoard = () => {
                   riders={riders}
                   onAssign={handleAssign}
                   onStatusUpdate={handleStatusUpdate}
+                  onViewProof={handleViewProof}
                   assigning={assigning}
                 />
               ))}
@@ -597,6 +639,47 @@ const DeliveryBoard = () => {
           }
         }
       `}</style>
+
+      {/* Delivery proof modal */}
+      {proofOrder && (
+        <div onClick={() => setProofOrder(null)} style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '20px' }}>
+          <div onClick={e => e.stopPropagation()} style={{ background: '#fff', borderRadius: '16px', padding: '24px', maxWidth: '480px', width: '100%', maxHeight: '85vh', overflowY: 'auto' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+              <h3 style={{ margin: 0, fontSize: '16px', fontWeight: '700' }}>Delivery Proof — {proofOrder.order_number}</h3>
+              <button onClick={() => setProofOrder(null)} style={{ background: 'none', border: 'none', fontSize: '18px', cursor: 'pointer', color: '#6b7280' }}>✕</button>
+            </div>
+
+            {proofOrder.proof_photo ? (
+              <img src={proofOrder.proof_photo} alt="Delivery proof" style={{ width: '100%', borderRadius: '10px', marginBottom: '14px' }} />
+            ) : (
+              <div style={{ padding: '30px', textAlign: 'center', color: '#9ca3af', background: '#f9fafb', borderRadius: '10px', marginBottom: '14px', fontSize: '13px' }}>
+                No photo was captured for this delivery
+              </div>
+            )}
+
+            <div style={{ display: 'grid', gap: '10px', fontSize: '13px' }}>
+              {proofOrder.recipient_name && (
+                <div><span style={{ color: '#9ca3af' }}>Received by:</span> <strong>{proofOrder.recipient_name}</strong></div>
+              )}
+              {proofOrder.delivery_notes && (
+                <div><span style={{ color: '#9ca3af' }}>Notes:</span> {proofOrder.delivery_notes}</div>
+              )}
+              {proofOrder.delivered_at && (
+                <div><span style={{ color: '#9ca3af' }}>Delivered at:</span> {new Date(proofOrder.delivered_at).toLocaleString()}</div>
+              )}
+              {!proofOrder.recipient_name && !proofOrder.delivery_notes && !proofOrder.proof_photo && (
+                <div style={{ color: '#9ca3af', fontStyle: 'italic' }}>No proof details were recorded for this delivery.</div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {loadingProof && (
+        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.3)', zIndex: 500, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ background: '#fff', padding: '16px 24px', borderRadius: '10px', fontSize: '13px', color: '#6b7280' }}>Loading proof…</div>
+        </div>
+      )}
 
     </div>
   );

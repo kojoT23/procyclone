@@ -17,6 +17,15 @@ const settingsAPI = {
   changePassword:       (data)   => API.post('/auth/change-password', data),
 };
 
+/* ─── Staff portal access API ────────────────────────────────────
+   Mirrors riders.user_id: a granted user can open /portal on
+   their phone. Super_admin only. ──────────────────────────────── */
+const portalAccessAPI = {
+  getList: ()         => API.get('/settings/portal-access'),
+  grant:   (userId)   => API.post(`/settings/portal-access/${userId}`),
+  revoke:  (userId)   => API.delete(`/settings/portal-access/${userId}`),
+};
+
 /* ─── Confirm modal ───────────────────────────────────────────── */
 const ConfirmModal = ({ config, onClose, onConfirm, loading }) => {
   const [typed, setTyped] = useState('');
@@ -101,6 +110,9 @@ const Settings = () => {
   const [resetLogs,    setResetLogs]    = useState([]);
   const [loadingStats, setLoadingStats] = useState(true);
   const [allRiders,    setAllRiders]    = useState([]);
+  const [portalStaff,      setPortalStaff]      = useState([]);
+  const [loadingPortalStaff, setLoadingPortalStaff] = useState(true);
+  const [portalActionId,   setPortalActionId]   = useState(null);
   const [modal,        setModal]        = useState(null); // config object
   const [actionLoading, setActionLoading] = useState(false);
   const [toast,        setToast]        = useState(null);
@@ -131,6 +143,40 @@ const Settings = () => {
   }, [isAdmin]);
 
   useEffect(() => { fetchStats(); }, [fetchStats]);
+
+  /* ── Staff portal access ──────────────────────────────────────── */
+  const fetchPortalStaff = useCallback(async () => {
+    if (!isSuperAdmin) return;
+    try {
+      setLoadingPortalStaff(true);
+      const res = await portalAccessAPI.getList();
+      setPortalStaff(res.data.staff || []);
+    } catch {
+      setPortalStaff([]);
+    } finally {
+      setLoadingPortalStaff(false);
+    }
+  }, [isSuperAdmin]);
+
+  useEffect(() => { fetchPortalStaff(); }, [fetchPortalStaff]);
+
+  const togglePortalAccess = async (member) => {
+    setPortalActionId(member.id);
+    try {
+      if (member.portal_access) {
+        await portalAccessAPI.revoke(member.id);
+        showToast(`Revoked portal access for ${member.name}`);
+      } else {
+        await portalAccessAPI.grant(member.id);
+        showToast(`Granted portal access to ${member.name}`);
+      }
+      fetchPortalStaff();
+    } catch (err) {
+      showToast(err.response?.data?.message || 'Failed to update portal access', 'danger');
+    } finally {
+      setPortalActionId(null);
+    }
+  };
 
   /* ── Toast helper ──────────────────────────────────────────── */
   const showToast = (msg, type = 'success') => {
@@ -240,6 +286,7 @@ const Settings = () => {
   { key: 'account',  label: '👤 Account'  },
   { key: 'whatsapp', label: '💬 WhatsApp' },
   { key: 'telegram', label: '✈️ Telegram' },
+  ...(isSuperAdmin ? [{ key: 'portal-access', label: '📱 Portal Access' }] : []),
   ...(isAdmin ? [{ key: 'danger', label: '⚠️ Danger Zone' }] : []),
 ];
   /* ── Action log label ──────────────────────────────────────── */
@@ -484,6 +531,73 @@ const Settings = () => {
       {activeTab === 'whatsapp' && <WhatsAppSettings />}
 
       {activeTab === 'telegram' && <TelegramSettings riders={allRiders} />}
+
+      {/* ════════════════════════════════════════════════════════
+          TAB: Portal Access (super_admin ONLY)
+          Mirrors the "Link Staff Account" pattern on the Riders
+          page — granting access here is what lets an admin/
+          manager/super_admin open /portal on their phone.
+      ════════════════════════════════════════════════════════ */}
+      {activeTab === 'portal-access' && isSuperAdmin && (
+        <div className="card" style={{ maxWidth: '720px' }}>
+          <h3 style={{ fontSize: '15px', fontWeight: '700', margin: '0 0 4px' }}>
+            Staff Portal Access
+          </h3>
+          <p className="page-subtitle" style={{ margin: '0 0 20px' }}>
+            Choose which admins, managers, and super admins can use the mobile portal at{' '}
+            <code>/portal</code>. This only controls whether they can open the portal app —
+            their existing role still decides what they can see and do once inside.
+          </p>
+
+          {loadingPortalStaff ? (
+            <div className="loading"><div className="loading-spinner" /></div>
+          ) : portalStaff.length === 0 ? (
+            <p style={{ color: 'var(--text-3)', fontSize: '13px' }}>No staff accounts found.</p>
+          ) : (
+            <div className="table-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th>Portal Access</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {portalStaff.map(member => (
+                    <tr key={member.id}>
+                      <td>{member.name}</td>
+                      <td style={{ color: 'var(--text-3)' }}>{member.email}</td>
+                      <td style={{ textTransform: 'capitalize' }}>{member.role?.replace('_', ' ')}</td>
+                      <td>
+                        <span
+                          className={`badge ${member.portal_access ? 'badge-success' : 'badge-secondary'}`}
+                        >
+                          {member.portal_access ? 'Enabled' : 'Disabled'}
+                        </span>
+                      </td>
+                      <td>
+                        <button
+                          className={`btn ${member.portal_access ? 'btn-secondary' : 'btn-primary'}`}
+                          style={{ padding: '6px 14px', fontSize: '12px' }}
+                          disabled={portalActionId === member.id}
+                          onClick={() => togglePortalAccess(member)}
+                        >
+                          {portalActionId === member.id
+                            ? 'Saving…'
+                            : member.portal_access ? 'Revoke' : 'Grant'}
+                        </button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </div>
+      )}
 
       {/* ════════════════════════════════════════════════════════
           TAB: Danger Zone (admin + super_admin only)

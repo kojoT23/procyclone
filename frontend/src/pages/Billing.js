@@ -285,8 +285,21 @@ const Billing = () => {
       const orderRes = await ordersAPI.create(orderPayload);
       const orderId = orderRes.data.order.id;
 
+      /* Order is already created successfully at this point — if rider
+         assignment fails, don't let it look like the whole order failed.
+         Surface it separately so the order isn't silently left
+         unassigned without the user knowing. */
       if (selectedRider) {
-        await ridersAPI.assignDelivery({ order_id: orderId, rider_id: parseInt(selectedRider) });
+        try {
+          await ridersAPI.assignDelivery({ order_id: orderId, rider_id: parseInt(selectedRider) });
+        } catch (assignErr) {
+          console.error('assignDelivery error:', assignErr);
+          alert(
+            'Order created, but rider assignment failed: ' +
+            (assignErr.response?.data?.message || assignErr.message) +
+            '. You can assign a rider from the Orders or Delivery Board page.'
+          );
+        }
       }
 
       navigate('/receipts', { state: { newOrderId: orderId, orderNumber: orderRes.data.order.order_number } });
@@ -313,6 +326,9 @@ const Billing = () => {
           <h1 className="page-title">New Bill</h1>
           <p className="page-subtitle">Create an order and generate a receipt instantly</p>
         </div>
+        <button className="btn btn-secondary" onClick={() => navigate('/billing/mass-order')}>
+          📦 Mass Order
+        </button>
       </div>
 
       {/* Steps */}

@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ordersAPI, customersAPI, productsAPI, deliveryZonesAPI, pricingSettingsAPI } from '../utils/api';
+import { useNavigate } from 'react-router-dom';
+import { ordersAPI, customersAPI, productsAPI, deliveryZonesAPI, pricingSettingsAPI, ridersAPI } from '../utils/api';
 import { useFormValidation, FormError, inputStyle, rules } from '../utils/useFormValidation';
 import { useAuth } from '../context/AuthContext';
 
@@ -77,6 +78,7 @@ const WhatsAppIcon = () => (
 const Orders = () => {
   const { user: currentUser } = useAuth();
   const isSuperAdmin = currentUser?.role === 'super_admin';
+  const navigate = useNavigate();
 
   /* Validation */
   const orderSchema = {
@@ -119,6 +121,8 @@ const Orders = () => {
   });
   const [zones,           setZones]           = useState([]);
   const [pricingSettings, setPricingSettings] = useState(null);
+  const [riders,          setRiders]          = useState([]);
+  const [selectedRider,   setSelectedRider]   = useState('');
 
   /* ── Fetch orders ─────────────────────────────────────────── */
   const fetchOrders = useCallback(async () => {
@@ -165,16 +169,18 @@ const Orders = () => {
   /* ── Open create modal ────────────────────────────────────── */
   const openCreate = async () => {
     try {
-      const [custRes, prodRes, zonesRes, pricingRes] = await Promise.all([
+      const [custRes, prodRes, zonesRes, pricingRes, ridersRes] = await Promise.all([
         customersAPI.getAll({ limit: 100 }),
         productsAPI.getAll({ limit: 100 }),
         deliveryZonesAPI.getAll(),
         pricingSettingsAPI.get(),
+        ridersAPI.getAll(),
       ]);
       setCustomers(custRes.data.customers || []);
       setProducts(prodRes.data.products?.filter(p => p.stock_quantity > 0) || []);
       setZones((zonesRes.data.zones || []).filter(z => z.is_active));
       setPricingSettings(pricingRes.data.settings || null);
+      setRiders(ridersRes.data.riders || []);
       setOrderForm({
         customer_id: '', payment_method: 'momo', momo_reference: '', delivery_address: '', notes: '', items: [],
         delivery_zone_id: '', manual_discount: '', discount_reason: '',
@@ -182,6 +188,7 @@ const Orders = () => {
       ca();
       setSelectedProduct('');
       setSelectedQty(1);
+      setSelectedRider('');
       setShowCreate(true);
     } catch (err) {
       console.error(err);
@@ -252,7 +259,7 @@ const Orders = () => {
     if (!orderForm.items.length) return alert('Please add at least one product');
     try {
       setSaving(true);
-      await ordersAPI.create({
+      const orderRes = await ordersAPI.create({
         customer_id:      parseInt(orderForm.customer_id),
         payment_method:   orderForm.payment_method,
         momo_reference:   orderForm.payment_method === 'momo' ? orderForm.momo_reference : undefined,
@@ -267,8 +274,28 @@ const Orders = () => {
           unit_price: i.unit_price,
         })),
       });
+      const orderId = orderRes.data.order.id;
+
+      /* Rider assignment is optional here, same as in Billing.js —
+         only assign if the user picked one. */
+      if (selectedRider) {
+        try {
+          await ridersAPI.assignDelivery({ order_id: orderId, rider_id: parseInt(selectedRider) });
+        } catch (assignErr) {
+          /* Order was already created successfully — don't lose that.
+             Surface the assignment failure separately so the order
+             isn't silently left unassigned without the user knowing. */
+          console.error('assignDelivery error:', assignErr);
+          alert(
+            'Order created, but rider assignment failed: ' +
+            (assignErr.response?.data?.message || assignErr.message) +
+            '. You can assign a rider from the Orders or Delivery Board page.'
+          );
+        }
+      }
+
       setShowCreate(false);
-      fetchOrders();
+      navigate('/receipts', { state: { newOrderId: orderId, orderNumber: orderRes.data.order.order_number } });
     } catch (err) {
       alert(err.response?.data?.message || 'Error creating order');
     } finally {
@@ -763,6 +790,26 @@ const Orders = () => {
                   Add more items or choose a different zone.
                 </p>
               )}
+            </div>
+
+            {/* Rider — optional, matches Billing.js behavior */}
+            <div className="form-group">
+              <label className="form-label">
+                Assign Rider
+                <span style={{ color: 'var(--text-3)', fontWeight: '400', marginLeft: '4px' }}>(optional — can assign later)</span>
+              </label>
+              <select
+                className="form-input"
+                value={selectedRider}
+                onChange={e => setSelectedRider(e.target.value)}
+              >
+                <option value="">Assign later</option>
+                {riders.map(r => (
+                  <option key={r.id} value={r.id}>
+                    {r.name} — {r.phone} — {r.is_available ? 'Available' : 'Busy'}
+                  </option>
+                ))}
+              </select>
             </div>
 
             {/* Payment method */}

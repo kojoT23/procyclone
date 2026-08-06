@@ -1,7 +1,10 @@
 const express = require('express');
 const router = express.Router();
-const { getRevenueReport, getProductReport, getRiderReport } = require('../controllers/reportController');
+const { getRevenueReport, getProductReport, getRiderReport, getPnLReport, getBudgetVsActualReport, getMarginTrendReport, getExceptionsReport, getAuditTrailReport, getCashReconciliationReport, getLoginAnomaliesReport, getPermissionChangeReport, getCashierPerformanceReport, getTrueMarginReport, getCashFlowReport, getVatEstimateReport, getUnitEconomicsReport, getCashRunwayReport, getReorderPointReport, getSupplierScorecardReport, getCustomerAnalyticsReport, getDemandForecastReport, getNewProductScorecardReport, getProductViabilityReport, getManagerPerformanceReport, getOrderJourneyReport, getDailySalesRegisterReport } = require('../controllers/reportController');
 const { protect, authorize } = require('../middleware/auth');
+const { exportReport } = require('../controllers/reportExportController');
+const { getSettings, updateSettings } = require('../controllers/reportSettingsController');
+
 
 router.use(protect);
 router.use(authorize('super_admin', 'admin', 'manager'));
@@ -9,5 +12,30 @@ router.use(authorize('super_admin', 'admin', 'manager'));
 router.get('/revenue', getRevenueReport);
 router.get('/products', getProductReport);
 router.get('/riders', getRiderReport);
-
+router.get('/pnl', getPnLReport);
+router.get('/budget', getBudgetVsActualReport);
+router.get('/margin-trend', getMarginTrendReport);
+router.get('/exceptions', getExceptionsReport);
+router.get('/audit-trail', getAuditTrailReport);
+router.get('/cash-reconciliation', getCashReconciliationReport);
+router.get('/login-anomalies', getLoginAnomaliesReport);
+router.get('/permission-changes', getPermissionChangeReport);
+router.get('/cashier-performance', getCashierPerformanceReport);
+router.get('/true-margin', getTrueMarginReport);
+router.get('/cash-flow', getCashFlowReport);
+router.get('/vat-estimate', getVatEstimateReport);
+router.get('/unit-economics', getUnitEconomicsReport);
+router.get('/cash-runway', getCashRunwayReport);
+router.get('/reorder-point', getReorderPointReport);
+router.get('/supplier-scorecard', getSupplierScorecardReport);
+router.get('/customer-analytics', getCustomerAnalyticsReport);
+router.get('/demand-forecast', getDemandForecastReport);
+router.get('/new-product-scorecard', getNewProductScorecardReport);
+router.get('/product-viability', getProductViabilityReport);
+router.get('/manager-performance', getManagerPerformanceReport);
+router.get('/order-journey', getOrderJourneyReport);
+router.get('/daily-sales-register', getDailySalesRegisterReport);
+router.get('/settings', getSettings);
+router.put('/settings', updateSettings);
+router.get('/:reportType/export', exportReport);
 module.exports = router;

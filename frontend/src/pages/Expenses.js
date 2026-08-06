@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { expensesAPI } from '../utils/api';
 
-const CATEGORIES = ['fuel', 'salaries', 'packaging', 'maintenance', 'rent', 'utilities', 'other'];
+const CATEGORIES = ['fuel', 'salaries', 'packaging', 'maintenance', 'rent', 'utilities', 'import', 'other'];
 const PAYMENT_METHODS = ['cash', 'mobile_money', 'bank_transfer'];
 
 const categoryColors = {
   fuel: '#f59e0b', salaries: '#3b82f6', packaging: '#8b5cf6',
-  maintenance: '#ef4444', rent: '#ec4899', utilities: '#14b8a6', other: '#6b7280'
+  maintenance: '#ef4444', rent: '#ec4899', utilities: '#14b8a6', import: '#0ea5e9', other: '#6b7280'
 };
 
 const fmt = (n) => `GHS ${parseFloat(n || 0).toLocaleString('en-GH', { minimumFractionDigits: 2 })}`;
@@ -226,8 +226,8 @@ export default function Expenses() {
       )}
 
       {showModal && (
-        <div className="modal">
-          <div className="modal-content" style={{ maxWidth: 480 }}>
+        <div className="modal-overlay" onClick={() => setShowModal(false)}>
+          <div className="modal" onClick={e => e.stopPropagation()} style={{ maxWidth: 480 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
               <h2 style={{ margin: 0, fontSize: 18, fontWeight: 600 }}>{editExpense ? 'Edit Expense' : 'Add Expense'}</h2>
               <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#6b7280' }}>×</button>

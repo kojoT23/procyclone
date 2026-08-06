@@ -1,7 +1,26 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
+import JsBarcode from 'jsbarcode';
 import { productsAPI } from '../utils/api';
 import { useAuth } from '../context/AuthContext';
 import { useFormValidation, FormError, inputStyle, rules } from '../utils/useFormValidation';
+
+/* ─── Barcode preview — renders whatever's in the barcode field as an
+   actual scannable CODE128 barcode, so staff can confirm it looks right
+   before printing rather than just seeing a string of digits. ─────── */
+const BarcodePreview = ({ value }) => {
+  const canvasRef = useRef(null);
+  useEffect(() => {
+    if (canvasRef.current && value) {
+      try {
+        JsBarcode(canvasRef.current, value, { format: 'CODE128', width: 1.5, height: 40, fontSize: 12, margin: 4 });
+      } catch (e) {
+        // Not a valid CODE128 value yet (e.g. still mid-typing) — the
+        // field itself still saves fine, this just skips the preview.
+      }
+    }
+  }, [value]);
+  return <canvas ref={canvasRef} />;
+};
 
 /* ─── CSV helper ──────────────────────────────────────────────── */
 const downloadCSV = (rows, filename) => {
@@ -88,8 +107,16 @@ const Products = () => {
   const [stockHistory,   setStockHistory]   = useState([]);
   const [loadingHistory, setLoadingHistory] = useState(false);
 
+  /* ── AI trending suggestions ─────────────────────────────────── */
+  const [showTrending,     setShowTrending]     = useState(false);
+  const [trendingLoading,  setTrendingLoading]  = useState(false);
+  const [trendingError,    setTrendingError]    = useState('');
+  const [trendingResults,  setTrendingResults]  = useState([]);
+  const [trendingCategory, setTrendingCategory] = useState('');
+
   const EMPTY_FORM = {
-    name: '', description: '', price: '', compare_price: '',
+    name: '', description: '', price: '', cost_price: '', compare_price: '',
+    sku: '', barcode: '',
     stock_quantity: '', low_stock_threshold: '5', category: '',
     image_url: '', image_base64: '', is_deal: false, is_active: true,
     badge: '', rating: '', review_count: '',
@@ -117,9 +144,6 @@ const Products = () => {
       setProducts(res.data.products || []);
       setTotal(res.data.total  || 0);
       setPages(res.data.pages  || 1);
-      // Extract unique categories
-      const cats = [...new Set((res.data.products || []).map(p => p.category).filter(Boolean))];
-      if (cats.length) setCategories(prev => [...new Set([...prev, ...cats])]);
     } catch (err) {
       console.error(err);
     } finally {
@@ -127,7 +151,19 @@ const Products = () => {
     }
   }, [page, search, filterCat, filterStock, sortBy, sortDir]);
 
+  // Full category list, independent of pagination/filters — powers the
+  // filter dropdown and the add/edit form's datalist.
+  const fetchCategories = useCallback(async () => {
+    try {
+      const res = await productsAPI.getCategories();
+      setCategories(res.data.categories || []);
+    } catch (err) {
+      console.error(err);
+    }
+  }, []);
+
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
+  useEffect(() => { fetchCategories(); }, [fetchCategories]);
   useEffect(() => { setPage(1); setSelected([]); }, [search, filterCat, filterStock]);
 
   /* ── Sort toggle ─────────────────────────────────────────────── */
@@ -171,6 +207,9 @@ const Products = () => {
         Name:              p.name,
         Description:       p.description || '',
         'Price (GH₵)':    parseFloat(p.price || 0).toFixed(2),
+        'Cost (GH₵)':     p.cost_price ? parseFloat(p.cost_price).toFixed(2) : '',
+        'SKU':            p.sku || '',
+        'Barcode':        p.barcode || '',
         'Compare Price':   p.compare_price ? parseFloat(p.compare_price).toFixed(2) : '',
         Stock:             p.stock_quantity,
         'Low Stock Alert': p.low_stock_threshold,
@@ -222,9 +261,9 @@ const Products = () => {
 
   /* ── CSV template ────────────────────────────────────────────── */
   const downloadTemplate = () => {
-    const csv = `name,description,price,compare_price,stock_quantity,low_stock_threshold,category,badge,is_deal,rating,review_count
-iPhone 16 Pro,Latest Apple smartphone,2500.00,3000.00,10,3,Electronics,Best Seller,true,4.8,128
-Nike Air Force 1,Classic white sneakers,850.00,1200.00,5,2,Footwear,Hot Deal,true,4.5,64`;
+    const csv = `name,description,price,cost_price,compare_price,stock_quantity,low_stock_threshold,category,badge,is_deal,rating,review_count
+iPhone 16 Pro,Latest Apple smartphone,2500.00,1800.00,3000.00,10,3,Electronics,Best Seller,true,4.8,128
+Nike Air Force 1,Classic white sneakers,850.00,520.00,1200.00,5,2,Footwear,Hot Deal,true,4.5,64`;
     const blob = new Blob([csv], { type: 'text/csv' });
     const url  = URL.createObjectURL(blob);
     const a    = document.createElement('a');
@@ -337,7 +376,10 @@ Nike Air Force 1,Classic white sneakers,850.00,1200.00,5,2,Footwear,Hot Deal,tru
       name:               product.name              || '',
       description:        product.description       || '',
       price:              product.price             || '',
+      cost_price:         product.cost_price        ?? '',
       compare_price:      product.compare_price     || '',
+      sku:                product.sku               || '',
+      barcode:            product.barcode           || '',
       stock_quantity:     product.stock_quantity    ?? '',
       low_stock_threshold: product.low_stock_threshold || '5',
       category:           product.category          || '',
@@ -351,6 +393,45 @@ Nike Air Force 1,Classic white sneakers,850.00,1200.00,5,2,Footwear,Hot Deal,tru
     });
     setActiveSection('basic');
     ca();
+    setShowModal(true);
+  };
+
+  /* ── AI trending suggestions ────────────────────────────────────
+     Calls the backend, which asks Claude (with web search) for real,
+     current trending products — not invented ones. "Use this" prefills
+     the normal Add Product form so nothing bypasses your usual
+     review/validation before saving. */
+  const fetchTrendingSuggestions = async () => {
+    try {
+      setTrendingLoading(true);
+      setTrendingError('');
+      const params = {};
+      if (trendingCategory) params.category = trendingCategory;
+      const res = await productsAPI.getTrendingSuggestions(params);
+      setTrendingResults(res.data.suggestions || []);
+    } catch (err) {
+      setTrendingError(err.response?.data?.message || 'Could not fetch suggestions right now');
+    } finally {
+      setTrendingLoading(false);
+    }
+  };
+
+  const openTrending = () => {
+    setShowTrending(true);
+    if (trendingResults.length === 0) fetchTrendingSuggestions();
+  };
+
+  const applySuggestion = (suggestion) => {
+    setEditing(null);
+    setForm({
+      ...EMPTY_FORM,
+      name: suggestion.name || '',
+      description: suggestion.description || '',
+      category: suggestion.category || '',
+    });
+    setActiveSection('basic');
+    ca();
+    setShowTrending(false);
     setShowModal(true);
   };
 
@@ -369,6 +450,7 @@ Nike Air Force 1,Classic white sneakers,850.00,1200.00,5,2,Footwear,Hot Deal,tru
         : await productsAPI.create(payload);
       setShowModal(false);
       fetchProducts();
+      fetchCategories();
     } catch (err) {
       alert(err.response?.data?.message || 'Error saving product');
     } finally {
@@ -400,6 +482,7 @@ Nike Air Force 1,Classic white sneakers,850.00,1200.00,5,2,Footwear,Hot Deal,tru
             {importing ? '⏳ Importing…' : '📤 Import CSV'}
           </button>
           <input ref={fileInputRef} type="file" accept=".csv" style={{ display: 'none' }} onChange={handleCSVImport} />
+          <button className="btn btn-secondary btn-sm" onClick={openTrending}>✨ Trending Ideas</button>
           <button className="btn btn-primary" onClick={openAdd}>+ Add Product</button>
         </div>
       </div>
@@ -491,6 +574,7 @@ Nike Air Force 1,Classic white sneakers,850.00,1200.00,5,2,Footwear,Hot Deal,tru
                     <th onClick={() => handleSort('price')} style={{ cursor: 'pointer', userSelect: 'none' }}>
                       Price <SortIcon col="price" />
                     </th>
+                    <th>Margin</th>
                     <th>Discount</th>
                     <th onClick={() => handleSort('stock_quantity')} style={{ cursor: 'pointer', userSelect: 'none' }}>
                       Stock <SortIcon col="stock_quantity" />
@@ -539,6 +623,9 @@ Nike Air Force 1,Classic white sneakers,850.00,1200.00,5,2,Footwear,Hot Deal,tru
                             )}
                             <div>
                               <div style={{ fontWeight: '600', fontSize: '13px' }}>{product.name}</div>
+                              {product.sku && (
+                                <div style={{ fontSize: '10.5px', color: 'var(--blue, #3b82f6)', fontFamily: 'monospace' }}>{product.sku}</div>
+                              )}
                               {product.description && (
                                 <div style={{ fontSize: '11px', color: 'var(--text-3)' }}>
                                   {product.description.substring(0, 40)}{product.description.length > 40 ? '…' : ''}
@@ -549,6 +636,19 @@ Nike Air Force 1,Classic white sneakers,850.00,1200.00,5,2,Footwear,Hot Deal,tru
                         </td>
                         <td style={{ color: 'var(--text-2)', fontSize: '13px' }}>{product.category || '—'}</td>
                         <td style={{ fontWeight: '700' }}>GH₵ {parseFloat(product.price || 0).toFixed(2)}</td>
+                        <td>
+                          {product.cost_price ? (() => {
+                            const profit = parseFloat(product.price || 0) - parseFloat(product.cost_price);
+                            const marginPct = product.price > 0 ? Math.round((profit / parseFloat(product.price)) * 100) : 0;
+                            return (
+                              <span style={{ fontSize: '12px', fontWeight: 700, color: profit >= 0 ? 'var(--accent, #22c55e)' : '#ef4444' }}>
+                                GH₵{profit.toFixed(2)} ({marginPct}%)
+                              </span>
+                            );
+                          })() : (
+                            <span style={{ fontSize: '11px', color: 'var(--text-3)', fontStyle: 'italic' }}>Add cost</span>
+                          )}
+                        </td>
                         <td>{discount ? <span className="badge badge-red">-{discount}%</span> : '—'}</td>
                         <td>
                           {/* Quick stock adjust */}
@@ -680,7 +780,27 @@ Nike Air Force 1,Classic white sneakers,850.00,1200.00,5,2,Footwear,Hot Deal,tru
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div className="form-group">
                     <label className="form-label">Category</label>
-                    <input className="form-input" value={form.category} onChange={e => setForm(f => ({ ...f, category: e.target.value }))} placeholder="e.g. Electronics" list="cat-list" />
+                    <input
+                      className="form-input"
+                      value={form.category}
+                      onChange={e => {
+                        const category = e.target.value;
+                        setForm(f => {
+                          // Auto-suggest a SKU the moment a category is
+                          // picked on a NEW product — never overwrites one
+                          // that's already there (own or previously typed),
+                          // since this is a starting point, not a rule.
+                          if (f.sku || editing) return { ...f, category };
+                          const prefix = category.slice(0, 3).toUpperCase();
+                          if (!prefix) return { ...f, category };
+                          const existingCount = products.filter(p => p.sku?.startsWith(prefix)).length;
+                          const suggested = `${prefix}-${String(existingCount + 1).padStart(4, '0')}`;
+                          return { ...f, category, sku: suggested };
+                        });
+                      }}
+                      placeholder="e.g. Electronics"
+                      list="cat-list"
+                    />
                     <datalist id="cat-list">
                       {categories.map(c => <option key={c} value={c} />)}
                     </datalist>
@@ -697,6 +817,48 @@ Nike Air Force 1,Classic white sneakers,850.00,1200.00,5,2,Footwear,Hot Deal,tru
                     </select>
                   </div>
                 </div>
+                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
+                  <div className="form-group">
+                    <label className="form-label">SKU</label>
+                    <input
+                      className="form-input"
+                      value={form.sku}
+                      onChange={e => setForm(f => ({ ...f, sku: e.target.value }))}
+                      placeholder="Auto-suggested from category"
+                    />
+                    <p style={{ fontSize: '12px', color: 'var(--text-3)', margin: '4px 0 0' }}>Suggested when you pick a category — edit freely</p>
+                  </div>
+                  <div className="form-group">
+                    <label className="form-label">Barcode</label>
+                    <div style={{ display: 'flex', gap: '8px' }}>
+                      <input
+                        className="form-input"
+                        value={form.barcode}
+                        onChange={e => setForm(f => ({ ...f, barcode: e.target.value }))}
+                        placeholder="Scan or generate one"
+                        style={{ flex: 1 }}
+                      />
+                      <button
+                        type="button"
+                        className="btn btn-secondary"
+                        onClick={() => {
+                          // 13-digit numeric code — matches standard EAN-13
+                          // length, so any barcode printer/scanner setup
+                          // expecting that format works without translation.
+                          const code = String(Date.now()).slice(-13).padStart(13, '0');
+                          setForm(f => ({ ...f, barcode: code }));
+                        }}
+                      >
+                        Generate
+                      </button>
+                    </div>
+                    {form.barcode && (
+                      <div style={{ marginTop: '8px', padding: '8px', background: '#fff', borderRadius: '6px', textAlign: 'center' }}>
+                        <BarcodePreview value={form.barcode} />
+                      </div>
+                    )}
+                  </div>
+                </div>
                 <div className="form-group">
                   <label style={{ display: 'flex', alignItems: 'center', gap: '10px', cursor: 'pointer' }}>
                     <input type="checkbox" checked={form.is_active} onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))} style={{ width: '16px', height: '16px', accentColor: 'var(--accent)' }} />
@@ -711,6 +873,17 @@ Nike Air Force 1,Classic white sneakers,850.00,1200.00,5,2,Footwear,Hot Deal,tru
               <div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
                   <div className="form-group">
+                    <label className="form-label">Cost Price (GH₵)</label>
+                    <input
+                      className="form-input"
+                      type="number" min="0" step="0.01"
+                      value={form.cost_price}
+                      onChange={e => setForm(f => ({ ...f, cost_price: e.target.value }))}
+                      placeholder="What you paid for this"
+                    />
+                    <p style={{ fontSize: '12px', color: 'var(--text-3)', margin: '4px 0 0' }}>Purchase/landed cost — never shown to customers</p>
+                  </div>
+                  <div className="form-group">
                     <label className="form-label">Selling Price (GH₵) *</label>
                     <input
                       className="form-input"
@@ -722,10 +895,22 @@ Nike Air Force 1,Classic white sneakers,850.00,1200.00,5,2,Footwear,Hot Deal,tru
                     />
                     <FormError error={fe.price} />
                   </div>
-                  <div className="form-group">
-                    <label className="form-label">Compare Price (GH₵)</label>
-                    <input className="form-input" type="number" min="0" step="0.01" value={form.compare_price} onChange={e => setForm(f => ({ ...f, compare_price: e.target.value }))} placeholder="Original price" />
-                  </div>
+                </div>
+                {form.cost_price && form.price && (() => {
+                  const cost = parseFloat(form.cost_price);
+                  const sell = parseFloat(form.price);
+                  const profit = sell - cost;
+                  const marginPct = sell > 0 ? Math.round((profit / sell) * 100) : 0;
+                  return (
+                    <div className={`alert ${profit >= 0 ? 'alert-success' : 'alert-danger'}`} style={{ fontSize: '13px' }}>
+                      {profit >= 0 ? '💰' : '⚠️'} Profit: GH₵{profit.toFixed(2)} per unit ({marginPct}% margin)
+                      {profit < 0 && ' — this is priced below cost'}
+                    </div>
+                  );
+                })()}
+                <div className="form-group">
+                  <label className="form-label">Compare Price (GH₵)</label>
+                  <input className="form-input" type="number" min="0" step="0.01" value={form.compare_price} onChange={e => setForm(f => ({ ...f, compare_price: e.target.value }))} placeholder="Original price" />
                 </div>
                 {form.compare_price && form.price && parseFloat(form.compare_price) > parseFloat(form.price) && (
                   <div className="alert alert-info" style={{ fontSize: '13px' }}>
@@ -882,6 +1067,77 @@ Nike Air Force 1,Classic white sneakers,850.00,1200.00,5,2,Footwear,Hot Deal,tru
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ══════════════════════════════════════════════════════════
+          AI Trending Product Suggestions
+      ══════════════════════════════════════════════════════════ */}
+      {showTrending && (
+        <div className="modal-overlay" onClick={() => setShowTrending(false)}>
+          <div className="modal" style={{ maxWidth: '640px' }} onClick={e => e.stopPropagation()}>
+            <div className="modal-header">
+              <h2 className="modal-title">✨ Trending Product Ideas</h2>
+              <button className="modal-close" onClick={() => setShowTrending(false)}>✕</button>
+            </div>
+
+            <p style={{ fontSize: '13px', color: 'var(--text-3)', margin: '0 0 14px' }}>
+              AI-researched, based on current web results — not a guarantee of sales, just a starting point.
+              Review before adding.
+            </p>
+
+            <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
+              <input
+                className="form-input"
+                style={{ flex: 1 }}
+                value={trendingCategory}
+                onChange={e => setTrendingCategory(e.target.value)}
+                placeholder="Optional: narrow to a category, e.g. Electronics"
+                onKeyDown={e => e.key === 'Enter' && fetchTrendingSuggestions()}
+              />
+              <button className="btn btn-primary" onClick={fetchTrendingSuggestions} disabled={trendingLoading}>
+                {trendingLoading ? 'Searching…' : '🔍 Search'}
+              </button>
+            </div>
+
+            {trendingLoading ? (
+              <div className="loading"><div className="loading-spinner" /><span className="loading-text">Researching trending products…</span></div>
+            ) : trendingError ? (
+              <div className="empty-state">
+                <div className="empty-icon">⚠️</div>
+                <h3>Couldn't fetch suggestions</h3>
+                <p>{trendingError}</p>
+                <button className="btn btn-secondary" style={{ marginTop: '12px' }} onClick={fetchTrendingSuggestions}>Try again</button>
+              </div>
+            ) : trendingResults.length === 0 ? (
+              <div className="empty-state">
+                <div className="empty-icon">✨</div>
+                <h3>No suggestions yet</h3>
+                <p>Click Search to get AI-researched trending product ideas</p>
+              </div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '55vh', overflowY: 'auto' }}>
+                {trendingResults.map((s, i) => (
+                  <div key={i} style={{ border: '1px solid var(--border)', borderRadius: '10px', padding: '12px 14px' }}>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'start', gap: '10px' }}>
+                      <div>
+                        <p style={{ fontWeight: '700', margin: '0 0 2px' }}>{s.name}</p>
+                        {s.category && <span className="badge badge-blue" style={{ marginBottom: '6px', display: 'inline-block' }}>{s.category}</span>}
+                      </div>
+                      <button className="btn btn-primary btn-sm" onClick={() => applySuggestion(s)} style={{ whiteSpace: 'nowrap' }}>
+                        Use this
+                      </button>
+                    </div>
+                    {s.description && <p style={{ fontSize: '13px', color: 'var(--text-2)', margin: '6px 0' }}>{s.description}</p>}
+                    <div style={{ display: 'flex', gap: '14px', fontSize: '12px', color: 'var(--text-3)' }}>
+                      {s.suggested_price_range && <span>💰 {s.suggested_price_range}</span>}
+                      {s.why_trending && <span>📈 {s.why_trending}</span>}
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
           </div>

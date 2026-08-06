@@ -16,7 +16,9 @@ const Login = () => {
     setError('');
     try {
       const result = await login(email, password);
-      if (result.user.role === 'rider') { navigate('/portal'); } else { navigate('/'); }
+      if (result.user.role === 'rider') { navigate('/portal'); }
+      else if (result.user.role === 'customer_support') { navigate('/transport'); }
+      else { navigate('/'); }
     } catch (err) {
       setError(err.response?.data?.message || 'Invalid email or password');
     } finally {

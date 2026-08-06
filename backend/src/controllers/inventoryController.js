@@ -51,20 +51,20 @@ const adjustStock = async (req, res) => {
       return res.status(400).json({ success: false, message: 'product_id, type and quantity are required' });
     }
 
-    const validTypes = ['adjustment', 'damage', 'return', 'transfer'];
+    const validTypes = ['adjustment', 'damage', 'return', 'transfer', 'purchase'];
     if (!validTypes.includes(type)) {
       return res.status(400).json({ success: false, message: `Type must be one of: ${validTypes.join(', ')}` });
     }
 
     await client.query('BEGIN');
 
-    const product = await client.query('SELECT * FROM products WHERE id = $1', [product_id]);
+    const product = await client.query('SELECT * FROM products WHERE id = $1 FOR UPDATE', [product_id]);
     if (product.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ success: false, message: 'Product not found' });
     }
 
-    // Negative types reduce stock
+    // Negative types reduce stock; everything else (including manual 'purchase' entries) adds
     const negativeTypes = ['damage', 'transfer'];
     const delta = negativeTypes.includes(type) ? -Math.abs(quantity) : Math.abs(quantity);
     const newStock = product.rows[0].stock_quantity + delta;
@@ -168,6 +168,27 @@ const updateSupplier = async (req, res) => {
   }
 };
 
+// Soft delete — sets is_active = false rather than removing the row,
+// since suppliers are referenced by import_shipments and
+// purchase_orders. A hard delete would either orphan those records or
+// require a destructive cascade; deactivating keeps history intact and
+// just hides the supplier from new-shipment/new-PO pickers going
+// forward (getSuppliers already filters on is_active = true).
+const deleteSupplier = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const result = await pool.query(
+      `UPDATE suppliers SET is_active = false, updated_at = NOW() WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    if (result.rows.length === 0) return res.status(404).json({ success: false, message: 'Supplier not found' });
+    res.json({ success: true, message: 'Supplier deactivated', supplier: result.rows[0] });
+  } catch (error) {
+    console.error('deleteSupplier error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
 // ── Purchase Orders ────────────────────────────────────────────
 const getPurchaseOrders = async (req, res) => {
   try {
@@ -239,13 +260,146 @@ const createPurchaseOrder = async (req, res) => {
   }
 };
 
+const getPurchaseOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const po = await pool.query(
+      `SELECT po.*, s.name as supplier_name, u.name as created_by_name
+       FROM purchase_orders po
+       LEFT JOIN suppliers s ON po.supplier_id = s.id
+       LEFT JOIN users u ON po.created_by = u.id
+       WHERE po.id = $1`,
+      [id]
+    );
+    if (po.rows.length === 0) return res.status(404).json({ success: false, message: 'Purchase order not found' });
+
+    const items = await pool.query(
+      `SELECT poi.*, p.name as product_name
+       FROM purchase_order_items poi
+       LEFT JOIN products p ON poi.product_id = p.id
+       WHERE poi.purchase_order_id = $1 ORDER BY poi.id ASC`,
+      [id]
+    );
+
+    res.json({ success: true, purchase_order: { ...po.rows[0], items: items.rows } });
+  } catch (error) {
+    console.error('getPurchaseOrder error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+// Only editable while still 'pending' — once received (or partially
+// received), stock has already moved off these numbers, so changing
+// quantities/costs after the fact would silently disagree with what
+// actually happened. Cancelled POs are also locked, same reasoning.
+const updatePurchaseOrder = async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const { id } = req.params;
+    const { supplier_id, items, notes, expected_date } = req.body;
+
+    await client.query('BEGIN');
+
+    const existing = await client.query('SELECT * FROM purchase_orders WHERE id = $1', [id]);
+    if (existing.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Purchase order not found' });
+    }
+    if (existing.rows[0].status !== 'pending') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: 'Only a pending purchase order can be edited' });
+    }
+    if (!items || items.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: 'At least one item is required' });
+    }
+
+    const total = items.reduce((sum, item) => sum + item.unit_cost * item.quantity_ordered, 0);
+
+    const result = await client.query(
+      `UPDATE purchase_orders SET supplier_id = $1, total_amount = $2, notes = $3, expected_date = $4, updated_at = NOW()
+       WHERE id = $5 RETURNING *`,
+      [supplier_id, total, notes, expected_date || null, id]
+    );
+
+    await client.query('DELETE FROM purchase_order_items WHERE purchase_order_id = $1', [id]);
+    for (const item of items) {
+      await client.query(
+        `INSERT INTO purchase_order_items (purchase_order_id, product_id, quantity_ordered, unit_cost)
+         VALUES ($1, $2, $3, $4)`,
+        [id, item.product_id, item.quantity_ordered, item.unit_cost]
+      );
+    }
+
+    await client.query('COMMIT');
+    res.json({ success: true, message: 'Purchase order updated', purchase_order: result.rows[0] });
+  } catch (error) {
+    await client.query('ROLLBACK');
+    console.error('updatePurchaseOrder error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  } finally {
+    client.release();
+  }
+};
+
+const cancelPurchaseOrder = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const existing = await pool.query('SELECT status FROM purchase_orders WHERE id = $1', [id]);
+    if (existing.rows.length === 0) return res.status(404).json({ success: false, message: 'Purchase order not found' });
+    if (existing.rows[0].status !== 'pending') {
+      return res.status(400).json({ success: false, message: 'Only a pending purchase order can be cancelled' });
+    }
+    const result = await pool.query(
+      `UPDATE purchase_orders SET status = 'cancelled', updated_at = NOW() WHERE id = $1 RETURNING *`,
+      [id]
+    );
+    res.json({ success: true, message: 'Purchase order cancelled', purchase_order: result.rows[0] });
+  } catch (error) {
+    console.error('cancelPurchaseOrder error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
 const receivePurchaseOrder = async (req, res) => {
   const client = await pool.connect();
   try {
     const { id } = req.params;
-    const { items } = req.body;
+    let { items } = req.body;
 
     await client.query('BEGIN');
+
+    const existingPO = await client.query('SELECT status FROM purchase_orders WHERE id = $1', [id]);
+    if (existingPO.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ success: false, message: 'Purchase order not found' });
+    }
+    if (existingPO.rows[0].status === 'cancelled') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: 'This purchase order was cancelled and cannot be received' });
+    }
+    if (existingPO.rows[0].status === 'received') {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: 'This purchase order was already received' });
+    }
+
+    // Callers (dashboard + portal) currently send no items — default to
+    // receiving the full ordered quantity for every line on this PO.
+    if (!items || items.length === 0) {
+      const poItems = await client.query(
+        'SELECT id, product_id, quantity_ordered FROM purchase_order_items WHERE purchase_order_id = $1',
+        [id]
+      );
+      if (poItems.rows.length === 0) {
+        await client.query('ROLLBACK');
+        return res.status(404).json({ success: false, message: 'Purchase order has no items' });
+      }
+      items = poItems.rows.map(row => ({
+        id: row.id,
+        product_id: row.product_id,
+        quantity_received: row.quantity_ordered,
+      }));
+    }
 
     for (const item of items) {
       if (item.quantity_received > 0) {
@@ -293,7 +447,11 @@ module.exports = {
   getSuppliers,
   createSupplier,
   updateSupplier,
+  deleteSupplier,
   getPurchaseOrders,
+  getPurchaseOrder,
   createPurchaseOrder,
+  updatePurchaseOrder,
+  cancelPurchaseOrder,
   receivePurchaseOrder,
 };

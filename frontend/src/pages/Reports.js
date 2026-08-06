@@ -498,6 +498,7 @@ const Reports = () => {
                         <th>Success Rate</th>
                         <th>Cash Collected</th>
                         <th>Disputes</th>
+                        <th>Resolved</th>
                       </tr>
                     </thead>
                     <tbody>
@@ -527,6 +528,9 @@ const Reports = () => {
                               fontWeight: r.disputed_collections > 0 ? '700' : '400',
                             }}>
                               {r.disputed_collections}
+                            </td>
+                            <td style={{ color: '#1d4ed8', fontWeight: r.resolved_collections > 0 ? '700' : '400' }}>
+                              {r.resolved_collections || 0}
                             </td>
                           </tr>
                         );

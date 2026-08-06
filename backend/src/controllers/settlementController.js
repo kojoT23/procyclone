@@ -1,5 +1,6 @@
 const { body } = require('express-validator');
 const pool = require('../config/db');
+const { BUDGETED_TOTAL_SQL, ACTUAL_TOTAL_SQL } = require('./importController');
 
 const declareSettlementValidation = [
   body('order_ids').isArray({ min: 1 }).withMessage('Select at least one order to settle'),
@@ -9,6 +10,8 @@ const declareSettlementValidation = [
 const approveSettlementValidation = [
   body('approved_amount').isFloat({ min: 0 }).withMessage('Approved amount must be a positive number'),
 ];
+
+const OVERVIEW_ROLES = ['super_admin', 'admin', 'manager'];
 
 /* ─────────────────────────────────────────────────────────────────
    Shared helper — a rider's outstanding balance.
@@ -211,8 +214,107 @@ const approveSettlement = async (req, res) => {
   }
 };
 
+/* ── GET /api/settlements/overview — office-only "all monies" view ──
+   Pulls together the three money streams that used to live in three
+   separate pages:
+     1. Rider cash outstanding — unsettled COD across ALL riders, not
+        just one (getOutstandingForRider is per-rider; this is the
+        fleet-wide total).
+     2. Expenses over the period (defaults to last 30 days).
+     3. Import shipment spend — budgeted (all non-cancelled) vs actual
+        (received only, so it's real money already spent, not a
+        forecast).
+   Revenue is included too so this reads as a real financial snapshot,
+   not just a list of outflows. start_date/end_date are optional —
+   omit both to get the default trailing 30 days. */
+const getFinancialOverview = async (req, res) => {
+  try {
+    if (!OVERVIEW_ROLES.includes(req.user.role)) {
+      return res.status(403).json({ success: false, message: 'Not authorized' });
+    }
+
+    const { start_date, end_date } = req.query;
+    const hasRange = start_date && end_date;
+
+    // 1. Outstanding rider cash — fleet-wide, mirrors getOutstandingForRider's
+    // logic but without the WHERE rider_id = $1 filter.
+    const outstandingResult = await pool.query(`
+      SELECT COALESCE(SUM(o.total_amount), 0) as total, COUNT(*) as order_count
+      FROM cash_logs cl
+      JOIN orders o ON cl.order_id = o.id
+      WHERE cl.status = 'pending'
+        AND cl.order_id NOT IN (
+          SELECT so.order_id FROM settlement_orders so
+          JOIN settlements s ON so.settlement_id = s.id
+          WHERE s.status IN ('declared', 'approved', 'disputed')
+        )
+    `);
+
+    // 2. Expenses over the period
+    const expenseWhere = hasRange
+      ? `WHERE expense_date >= $1 AND expense_date <= $2`
+      : `WHERE expense_date >= NOW() - INTERVAL '30 days'`;
+    const expenseParams = hasRange ? [start_date, end_date] : [];
+    const expensesResult = await pool.query(
+      `SELECT COALESCE(SUM(amount), 0) as total FROM expenses ${expenseWhere}`,
+      expenseParams
+    );
+
+    // 3. Import shipment spend — budgeted across everything still active,
+    // actual only for what's actually been received (real money out).
+    // Reuses the exact same totals calculation importController.js uses
+    // (import_shipment_items + custom cost items + currency conversion) —
+    // this table was restructured to support multi-item shipments since
+    // this query was first written, so it must stay in sync with that
+    // file's totals rather than recompute its own version.
+    const importsResult = await pool.query(`
+      SELECT
+        COALESCE(SUM(${BUDGETED_TOTAL_SQL}) FILTER (WHERE s.status NOT IN ('cancelled')), 0) as total_budgeted,
+        COALESCE(SUM(${ACTUAL_TOTAL_SQL}) FILTER (WHERE s.status = 'received'), 0) as total_actual_spent
+      FROM import_shipments s
+    `);
+
+    // 4. Revenue over the period — based on deliveries.delivered_at, the
+    // actual moment money was earned, not orders.updated_at (which
+    // changes for unrelated reasons like status edits).
+    const revenueWhere = hasRange
+      ? `WHERE d.status = 'delivered' AND d.delivered_at >= $1 AND d.delivered_at <= $2`
+      : `WHERE d.status = 'delivered' AND d.delivered_at >= NOW() - INTERVAL '30 days'`;
+    const revenueParams = hasRange ? [start_date, end_date] : [];
+    const revenueResult = await pool.query(
+      `SELECT COALESCE(SUM(o.total_amount), 0) as total
+       FROM orders o JOIN deliveries d ON d.order_id = o.id
+       ${revenueWhere}`,
+      revenueParams
+    );
+
+    const outstandingRiderCash = parseFloat(outstandingResult.rows[0].total);
+    const periodExpenses = parseFloat(expensesResult.rows[0].total);
+    const importBudgeted = parseFloat(importsResult.rows[0].total_budgeted);
+    const importActualSpent = parseFloat(importsResult.rows[0].total_actual_spent);
+    const periodRevenue = parseFloat(revenueResult.rows[0].total);
+    const netPosition = periodRevenue - periodExpenses - importActualSpent;
+
+    res.json({
+      success: true,
+      period: hasRange ? { start_date, end_date } : { days: 30 },
+      outstanding_rider_cash: outstandingRiderCash,
+      outstanding_order_count: parseInt(outstandingResult.rows[0].order_count),
+      period_expenses: periodExpenses,
+      period_revenue: periodRevenue,
+      import_budgeted: importBudgeted,
+      import_actual_spent: importActualSpent,
+      net_position: netPosition,
+    });
+  } catch (error) {
+    console.error('getFinancialOverview error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
 module.exports = {
   getOutstanding, declareSettlement, getSettlements, approveSettlement,
+  getFinancialOverview,
   declareSettlementValidation, approveSettlementValidation,
   getOutstandingForRider,
 };

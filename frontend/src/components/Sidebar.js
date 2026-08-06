@@ -37,6 +37,7 @@ const Sidebar = ({ isOpen, onClose }) => {
         { to: '/billing', label: 'New Bill',  icon: '💳', permission: null },
         { to: '/receipts',label: 'Receipts',  icon: '🧾', permission: null },
         { to: '/delivery',label: 'Delivery',  icon: '🏍️', permission: 'manage_riders' },
+        { to: '/scheduler', label: 'Scheduler', icon: '📅', permission: 'manage_riders' },
       ],
     },
     {
@@ -68,6 +69,7 @@ const Sidebar = ({ isOpen, onClose }) => {
         { to: '/reports',  label: 'Reports',      icon: '◐', permission: 'view_reports' },
         { to: '/expenses', label: 'Expenses',     icon: '💸', permission: 'manage_cash' },
         { to: '/settlements', label: 'Settlements', icon: '🤝', permission: 'manage_cash' },
+        { to: '/imports', label: 'Imports', icon: '📦', permission: 'manage_expenses' },
       ],
     },
     {
@@ -77,7 +79,13 @@ const Sidebar = ({ isOpen, onClose }) => {
       links: [
         { to: '/chat',      label: 'Messages',  icon: '💬', permission: null },
         { to: '/settings',  label: 'Settings',  icon: '⚙️', permission: null },
-        { to: '/portal', label: 'Rider Portal', icon: '🏍', permission: 'super_admin_only' },
+        { to: '/portal', label: 'My Portal', icon: '📱', permission: 'super_admin_only' },
+        { to: '/portal?view_as=rider', label: 'Rider Portal', icon: '🛵', permission: 'super_admin_only' },
+        { to: '/portal?view_as=cashier', label: 'Cashier Portal', icon: '💵', permission: 'super_admin_only' },
+        { to: '/portal?view_as=dispatcher', label: 'Dispatcher Portal', icon: '📡', permission: 'super_admin_only' },
+        { to: '/portal?view_as=warehouse', label: 'Warehouse Portal', icon: '📦', permission: 'super_admin_only' },
+        { to: '/portal?view_as=manager', label: 'Manager Portal', icon: '🗂️', permission: 'super_admin_only' },
+        { to: '/portal?view_as=admin', label: 'Admin Portal', icon: '🛡️', permission: 'super_admin_only' },
         { to: '/rbac', label: 'Permissions', icon: '🔐', permission: 'super_admin_only' },
         { to: '/audit-log', label: 'Audit Log', icon: '📋', permission: 'super_admin_only' },
       ],
@@ -177,7 +185,7 @@ const Sidebar = ({ isOpen, onClose }) => {
           transition: max-height 0.25s cubic-bezier(0.4,0,0.2,1),
                       opacity 0.2s ease;
         }
-        .sb-group-links.open { max-height: 400px; opacity: 1; }
+        .sb-group-links.open { max-height: 1000px; opacity: 1; }
         .sb-group-links.closed { max-height: 0; opacity: 0; }
 
         /* ── Scrollable nav ───────────────────────── */
