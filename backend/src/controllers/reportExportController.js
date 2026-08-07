@@ -393,9 +393,9 @@ const buildAuditTrailDocx = async (data) => {
     data.by_user.map(u => [u.user_name || 'Unknown', u.user_role || '-', u.count])
   );
   const logTable = docxTable(
-    ['Date', 'Staff', 'Action', 'Entity', 'Description'],
+    ['Date', 'Staff', 'Action', 'Entity', 'Description', 'IP Address'],
     data.logs.slice(0, 200).map(l => [
-      new Date(l.created_at).toLocaleString('en-GB'), l.user_name || 'Unknown', l.action, l.entity || '-', l.description || '-',
+      new Date(l.created_at).toLocaleString('en-GB'), l.user_name || 'Unknown', l.action, l.entity || '-', l.description || '-', l.ip_address || '-',
     ])
   );
   const body = [
@@ -425,10 +425,10 @@ const buildAuditTrailXlsx = async (data) => {
   data.by_user.forEach(u => byUser.addRow([u.user_name || 'Unknown', u.user_role || '-', u.count]));
 
   const log = wb.addWorksheet('Detail Log');
-  log.columns = [{ width: 20 }, { width: 18 }, { width: 20 }, { width: 14 }, { width: 50 }];
-  xlsxHeaderRow(log, ['Date', 'Staff', 'Action', 'Entity', 'Description']);
+  log.columns = [{ width: 20 }, { width: 18 }, { width: 20 }, { width: 14 }, { width: 50 }, { width: 16 }];
+  xlsxHeaderRow(log, ['Date', 'Staff', 'Action', 'Entity', 'Description', 'IP Address']);
   data.logs.forEach(l => log.addRow([
-    new Date(l.created_at).toLocaleString('en-GB'), l.user_name || 'Unknown', l.action, l.entity || '-', l.description || '-',
+    new Date(l.created_at).toLocaleString('en-GB'), l.user_name || 'Unknown', l.action, l.entity || '-', l.description || '-', l.ip_address || '-',
   ]));
 
   return wb.xlsx.writeBuffer();

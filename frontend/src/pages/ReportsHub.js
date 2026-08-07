@@ -1799,7 +1799,7 @@ const ReportsHub = () => {
                       ) : (
                         <div className="table-wrapper">
                           <table>
-                            <thead><tr><th>Date</th><th>Staff</th><th>Action</th><th>Entity</th><th>Description</th></tr></thead>
+                            <thead><tr><th>Date</th><th>Staff</th><th>Action</th><th>Entity</th><th>Description</th><th>IP Address</th></tr></thead>
                             <tbody>
                               {auditTrail.logs.map((l, i) => (
                                 <tr key={i}>
@@ -1808,6 +1808,7 @@ const ReportsHub = () => {
                                   <td><span className="badge badge-green">{l.action}</span></td>
                                   <td style={{ color: 'var(--text-2)' }}>{l.entity || '-'}</td>
                                   <td style={{ fontSize: '12px', color: 'var(--text-2)' }}>{l.description || '-'}</td>
+                                  <td style={{ fontSize: '12px', color: 'var(--text-3)', whiteSpace: 'nowrap' }}>{l.ip_address || '-'}</td>
                                 </tr>
                               ))}
                             </tbody>
