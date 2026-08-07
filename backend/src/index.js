@@ -17,7 +17,9 @@ const PORT = process.env.PORT || 5000;
 app.use(helmet());
 app.use(cors());
 app.use(morgan('dev'));
-app.use(express.json());
+app.use(express.json({
+  verify: (req, res, buf) => { req.rawBody = buf; }
+}));
 app.use(express.urlencoded({ extended: true }));
 app.use('/api/auth', require('./routes/authRoutes'));
 app.use('/api/products', require('./routes/productRoutes'));
@@ -49,6 +51,7 @@ app.use('/api/whatsapp', require('./routes/whatsapp'));
 app.use('/api/telegram', require('./routes/telegram'));
 // app.use('/api/chat', require('./routes/chat')); // disabled — routes/chat.js missing
 app.use('/api/hr', require('./routes/hr'));
+app.use('/api/webhooks', require('./routes/webhookRoutes'));
 app.get('/', (req, res) => { res.json({ success: true, message: 'Pro Cyclone API is running 🚀', version: '1.0.0' }); });
 app.get('/health', async (req, res) => { try { await pool.query('SELECT NOW()'); res.json({ success: true, message: 'Server and database are healthy ✅' }); } catch (error) { res.status(500).json({ success: false, message: 'Database connection failed ❌' }); } });
 process.on('uncaughtException', (err) => { console.error('Uncaught Exception:', err); });
