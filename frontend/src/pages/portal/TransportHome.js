@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ordersAPI, cashAPI } from '../../utils/api';
+import { ordersAPI, cashAPI, returnsAPI } from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
 
 const formatCurrency = (n) => 'GHS ' + parseFloat(n || 0).toFixed(2);
@@ -30,6 +30,7 @@ const TransportHome = () => {
   const [loading, setLoading] = useState(true);
   const [orders, setOrders] = useState([]);
   const [pendingCashTotal, setPendingCashTotal] = useState(0);
+  const [pendingReturns, setPendingReturns] = useState(0);
 
   useEffect(() => { fetchAll(); }, []);
 
@@ -42,6 +43,10 @@ const TransportHome = () => {
       setOrders(o.data.orders || []);
       const logs = c.data.logs || [];
       setPendingCashTotal(logs.filter(l => l.status === 'pending').reduce((s, l) => s + parseFloat(l.amount || 0), 0));
+      try {
+        const r = await returnsAPI.getAll({ assigned_to: 'me', status: 'pending_enquiry' });
+        setPendingReturns(r.data.total || 0);
+      } catch (e) { /* not fatal to the rest of the dashboard */ }
     } catch (err) {
       console.error(err);
     } finally {
@@ -78,6 +83,28 @@ const TransportHome = () => {
         <p style={{ fontSize: 13, color: '#9ca3af', margin: '0 0 2px' }}>{greeting()},</p>
         <h1 style={{ fontSize: 22, fontWeight: 800, color: '#1a1a18', margin: 0 }}>{user?.name?.split(' ')[0] || 'there'} 👋</h1>
       </div>
+
+      {pendingReturns > 0 && (
+        <div
+          onClick={() => navigate('/transport/returns')}
+          style={{
+            background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12,
+            padding: '14px 16px', marginBottom: 16, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 20 }}>⚠</span>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14, color: '#92400e' }}>
+                {pendingReturns} return{pendingReturns === 1 ? '' : 's'} awaiting your enquiry
+              </div>
+              <div style={{ fontSize: 12, color: '#b45309' }}>Tap to complete — stock stays on hold until you do</div>
+            </div>
+          </div>
+          <span style={{ color: '#b45309', fontSize: 18 }}>›</span>
+        </div>
+      )}
 
       {/* Stats */}
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 14 }}>

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ordersAPI, productsAPI, ridersAPI, cashAPI, paymentsAPI } from '../utils/api';
+import { ordersAPI, productsAPI, ridersAPI, cashAPI, paymentsAPI, returnsAPI } from '../utils/api';
+import { useAuth } from '../context/AuthContext';
 
 
 /* ─── Helpers ─────────────────────────────────────────────────── */
@@ -49,6 +50,10 @@ const PIPELINE = [
 ═══════════════════════════════════════════════════════════════ */
 const Dashboard = () => {
   const navigate  = useNavigate();
+  const { user } = useAuth();
+  const isAdmin = ['super_admin', 'admin', 'manager'].includes(user?.role);
+  const [pendingReturns, setPendingReturns] = useState(0);
+  const [pendingDisposals, setPendingDisposals] = useState(0);
 
   /* ── State ─────────────────────────────────────────────────── */
   const [loading,       setLoading]       = useState(true);
@@ -157,13 +162,23 @@ const Dashboard = () => {
       const pendingPay = paymentsRes.data?.pending_verification;
       setPendingPayments(parseInt(pendingPay?.count || 0));
 
+      /* Returns */
+      try {
+        const myReturns = await returnsAPI.getAll({ assigned_to: 'me', status: 'pending_enquiry' });
+        setPendingReturns(myReturns.data.total || 0);
+        if (isAdmin) {
+          const disposalQueue = await returnsAPI.getAll({ status: 'pending_disposal_approval' });
+          setPendingDisposals(disposalQueue.data.total || 0);
+        }
+      } catch (e) { /* not fatal to the rest of the dashboard */ }
+
       setLastRefresh(new Date());
     } catch (err) {
       console.error('Dashboard fetchAll error:', err);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
     fetchAll();
@@ -174,7 +189,7 @@ const Dashboard = () => {
   /* ── Derived ───────────────────────────────────────────────── */
   const availableRiders = riders.filter(r => r.is_available);
   const busyRiders      = riders.filter(r => !r.is_available);
-  const totalAlerts     = disputes + (lowStock.length > 0 ? 1 : 0) + (pendingCash > 0 ? 1 : 0) + (pendingPayments > 0 ? 1 : 0);
+  const totalAlerts     = disputes + (lowStock.length > 0 ? 1 : 0) + (pendingCash > 0 ? 1 : 0) + (pendingPayments > 0 ? 1 : 0) + (pendingReturns > 0 ? 1 : 0) + (pendingDisposals > 0 ? 1 : 0);
   const outForDelivery  = pipeline['out_for_delivery'] || 0;
 
   /* ── Loading ───────────────────────────────────────────────── */
@@ -242,6 +257,26 @@ const Dashboard = () => {
             >
               💳 <strong>{pendingPayments} payment{pendingPayments > 1 ? 's' : ''} pending verification</strong>
               <span style={{ marginLeft: 'auto', fontSize: '11px', opacity: 0.7 }}>View →</span>
+            </div>
+          )}
+          {pendingReturns > 0 && (
+            <div
+              className="alert alert-warning"
+              style={{ flex: 1, minWidth: '200px', cursor: 'pointer', margin: 0 }}
+              onClick={() => navigate('/returns')}
+            >
+              <strong>↩ {pendingReturns} return{pendingReturns > 1 ? 's' : ''} awaiting your enquiry</strong>
+              <span style={{ marginLeft: 'auto', fontSize: '11px', opacity: 0.7 }}>View xe2x86x92</span>
+            </div>
+          )}
+          {pendingDisposals > 0 && (
+            <div
+              className="alert alert-danger"
+              style={{ flex: 1, minWidth: '200px', cursor: 'pointer', margin: 0 }}
+              onClick={() => navigate('/returns')}
+            >
+              <strong>⚠ {pendingDisposals} damaged return{pendingDisposals > 1 ? 's' : ''} awaiting disposal approval</strong>
+              <span style={{ marginLeft: 'auto', fontSize: '11px', opacity: 0.7 }}>View xe2x86x92</span>
             </div>
           )}
           {lowStock.length > 0 && (

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
-import { ridersAPI, ordersAPI, cashAPI, settlementsAPI } from '../../utils/api';
+import { ridersAPI, ordersAPI, cashAPI, settlementsAPI, returnsAPI } from '../../utils/api';
 import { useAuth } from '../../context/AuthContext';
 import { useNavigate, useLocation } from 'react-router-dom';
 import API from '../../utils/api';
@@ -16,6 +16,7 @@ function RiderHome({ user }) {
   const [deliveries, setDeliveries] = useState([]);
   const [cashLogs, setCashLogs] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [pendingReturns, setPendingReturns] = useState(0);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -38,6 +39,10 @@ function RiderHome({ user }) {
         setStats(statsRes.data.stats || null);
         setCashLogs(cashRes.data.logs || []);
       }
+      try {
+        const returnsRes = await returnsAPI.getAll({ assigned_to: 'me', status: 'pending_enquiry' });
+        setPendingReturns(returnsRes.data.total || 0);
+      } catch (e) { /* not fatal to the rest of the dashboard */ }
     } catch (e) { console.error(e); }
     setLoading(false);
   }, [user]);
@@ -75,6 +80,28 @@ function RiderHome({ user }) {
         </h1>
         <p style={{ color: '#6b7280', fontSize: 13, margin: '4px 0 0' }}>{today}</p>
       </div>
+
+      {pendingReturns > 0 && (
+        <div
+          onClick={() => navigate('/portal/returns')}
+          style={{
+            background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 12,
+            padding: '14px 16px', marginBottom: 16, cursor: 'pointer',
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <span style={{ fontSize: 20 }}>⚠</span>
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14, color: '#92400e' }}>
+                {pendingReturns} return{pendingReturns === 1 ? '' : 's'} awaiting your enquiry
+              </div>
+              <div style={{ fontSize: 12, color: '#b45309' }}>Tap to complete — stock stays on hold until you do</div>
+            </div>
+          </div>
+          <span style={{ color: '#b45309', fontSize: 18 }}>›</span>
+        </div>
+      )}
 
       <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginBottom: 20 }}>
         {[
