@@ -120,7 +120,15 @@ export const paymentsAPI = {
   create: (data) => API.post('/payments', data),
   verify: (id, data) => API.put(`/payments/${id}/verify`, data),
   fail: (id) => API.put(`/payments/${id}/fail`),
+  refund: (id) => API.put(`/payments/${id}/refund`),
   getSummary: (params) => API.get('/payments/summary', { params }),
+};
+
+export const returnsAPI = {
+  getAll: (params) => API.get('/returns', { params }),
+  submitEnquiry: (id, data) => API.put(`/returns/${id}/enquiry`, data),
+  approveDisposal: (id, data) => API.put(`/returns/${id}/disposal`, data),
+  confirmRefund: (id) => API.put(`/returns/${id}/refund`),
 };
 
 export const businessProfileAPI = {

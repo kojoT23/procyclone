@@ -49,7 +49,8 @@ const StatusBadge = ({ status }) => {
   const cls =
     status === 'verified' ? 'badge badge-green'  :
     status === 'failed'   ? 'badge badge-red'    :
-    status === 'refunded' ? 'badge badge-purple' : 'badge badge-amber';
+    status === 'refunded' ? 'badge badge-purple' :
+    status === 'refund_pending' ? 'badge badge-amber' : 'badge badge-amber';
   return <span className={cls}>{status}</span>;
 };
 
@@ -671,6 +672,9 @@ const Payments = () => {
 
                             {payment.status === 'failed' && (
                               <span className="badge badge-red">✕ Failed</span>
+                            )}
+                            {payment.status === 'refund_pending' && (
+                              <span className="badge badge-amber">↩ Refund Pending — see Returns</span>
                             )}
                             {payment.status === 'refunded' && (
                               <span className="badge badge-purple">↩ Refunded</span>

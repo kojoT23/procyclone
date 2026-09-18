@@ -45,11 +45,20 @@ const getRevenueData = async ({ period = '30', start_date, end_date }) => {
   );
 
   const paymentBreakdown = await pool.query(
-    `SELECT payment_method, COUNT(*) as count, SUM(total_amount) as total
-     FROM orders
-     ${whereClause}
-     GROUP BY payment_method`,
+    `SELECT method as payment_method, COUNT(*) as count, SUM(amount) as total
+     FROM payments
+     ${whereClause} AND status = 'verified'
+     GROUP BY method`,
     queryParams
+  );
+
+  // Money currently owed back to customers (returned orders whose payment
+  // had already been verified before the failed delivery). Not scoped to
+  // the report period — this is a present-moment liability, like Cash
+  // Runway, not a historical figure.
+  const refundsOwed = await pool.query(
+    `SELECT COALESCE(SUM(amount), 0) as total, COUNT(*) as count
+     FROM payments WHERE status = 'refund_pending'`
   );
 
   return {
@@ -59,6 +68,7 @@ const getRevenueData = async ({ period = '30', start_date, end_date }) => {
     summary: summary.rows[0],
     daily: dailyRevenue.rows,
     payment_breakdown: paymentBreakdown.rows,
+    refunds_owed: refundsOwed.rows[0],
   };
 };
 

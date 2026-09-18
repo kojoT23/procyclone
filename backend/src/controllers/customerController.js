@@ -1,11 +1,15 @@
-
 const pool = require('../config/db');
+
+const CUSTOMER_COLUMNS = 'id, name, phone, email, address, notes, created_at, updated_at';
 
 const getCustomers = async (req, res) => {
   try {
-    const { search, page = 1, limit = 20 } = req.query;
+    const { search } = req.query;
+    const page = Math.max(parseInt(req.query.page) || 1, 1);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 20, 1), 100);
     const offset = (page - 1) * limit;
-    const conditions = [];
+
+    const conditions = ['deleted_at IS NULL'];
     const values = [];
     let i = 1;
 
@@ -14,11 +18,11 @@ const getCustomers = async (req, res) => {
       values.push(`%${search}%`); i++;
     }
 
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
+    const where = `WHERE ${conditions.join(' AND ')}`;
 
     const countResult = await pool.query(`SELECT COUNT(*) FROM customers ${where}`, values);
     const result = await pool.query(
-      `SELECT * FROM customers ${where} ORDER BY created_at DESC LIMIT $${i} OFFSET $${i + 1}`,
+      `SELECT ${CUSTOMER_COLUMNS} FROM customers ${where} ORDER BY created_at DESC LIMIT $${i} OFFSET $${i + 1}`,
       [...values, limit, offset]
     );
 
@@ -26,11 +30,12 @@ const getCustomers = async (req, res) => {
       success: true,
       count: result.rows.length,
       total: parseInt(countResult.rows[0].count),
-      page: parseInt(page),
+      page,
       pages: Math.ceil(parseInt(countResult.rows[0].count) / limit),
       customers: result.rows,
     });
   } catch (error) {
+    console.error('getCustomers error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
@@ -38,12 +43,16 @@ const getCustomers = async (req, res) => {
 const getCustomer = async (req, res) => {
   try {
     const { id } = req.params;
-    const result = await pool.query('SELECT * FROM customers WHERE id = $1', [id]);
+    const result = await pool.query(
+      `SELECT ${CUSTOMER_COLUMNS} FROM customers WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
+    );
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Customer not found' });
     }
     res.json({ success: true, customer: result.rows[0] });
   } catch (error) {
+    console.error('getCustomer error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
@@ -55,14 +64,15 @@ const createCustomer = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Name and phone are required' });
     }
     const result = await pool.query(
-      'INSERT INTO customers (name, phone, email, address) VALUES ($1, $2, $3, $4) RETURNING *',
-      [name, phone, email, address]
+      `INSERT INTO customers (name, phone, email, address) VALUES ($1, $2, $3, $4) RETURNING ${CUSTOMER_COLUMNS}`,
+      [name, phone, email || null, address || null]
     );
     res.status(201).json({ success: true, message: 'Customer created', customer: result.rows[0] });
   } catch (error) {
     if (error.code === '23505') {
       return res.status(409).json({ success: false, message: 'Phone number already exists' });
     }
+    console.error('createCustomer error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
@@ -71,15 +81,23 @@ const updateCustomer = async (req, res) => {
   try {
     const { id } = req.params;
     const { name, phone, email, address } = req.body;
+    if (!name || !phone) {
+      return res.status(400).json({ success: false, message: 'Name and phone are required' });
+    }
     const result = await pool.query(
-      'UPDATE customers SET name=$1, phone=$2, email=$3, address=$4, updated_at=NOW() WHERE id=$5 RETURNING *',
-      [name, phone, email, address, id]
+      `UPDATE customers SET name=$1, phone=$2, email=$3, address=$4, updated_at=NOW()
+       WHERE id=$5 AND deleted_at IS NULL RETURNING ${CUSTOMER_COLUMNS}`,
+      [name, phone, email || null, address || null, id]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Customer not found' });
     }
     res.json({ success: true, message: 'Customer updated', customer: result.rows[0] });
   } catch (error) {
+    if (error.code === '23505') {
+      return res.status(409).json({ success: false, message: 'Phone number already exists' });
+    }
+    console.error('updateCustomer error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
@@ -91,22 +109,32 @@ const deleteCustomer = async (req, res) => {
 
     await client.query('BEGIN');
 
-    const check = await client.query('SELECT id, name FROM customers WHERE id = $1', [id]);
+    const check = await client.query(
+      'SELECT id, name FROM customers WHERE id = $1 AND deleted_at IS NULL',
+      [id]
+    );
     if (check.rows.length === 0) {
       await client.query('ROLLBACK');
       return res.status(404).json({ success: false, message: 'Customer not found' });
     }
 
-    // Delete related records first
-    const orders = await client.query('SELECT id FROM orders WHERE customer_id = $1', [id]);
-    for (const order of orders.rows) {
-      await client.query('DELETE FROM order_items WHERE order_id = $1', [order.id]);
-      await client.query('DELETE FROM payments WHERE order_id = $1', [order.id]);
-      await client.query('DELETE FROM deliveries WHERE order_id = $1', [order.id]);
-      await client.query('DELETE FROM cash_logs WHERE order_id = $1', [order.id]);
+    const openOrders = await client.query(
+      `SELECT COUNT(*) FROM orders WHERE customer_id = $1 AND status NOT IN ('delivered', 'cancelled', 'failed')`,
+      [id]
+    );
+    if (parseInt(openOrders.rows[0].count) > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({
+        success: false,
+        message: 'Customer has open orders — resolve or cancel them before deleting',
+      });
     }
-    await client.query('DELETE FROM orders WHERE customer_id = $1', [id]);
-    await client.query('DELETE FROM customers WHERE id = $1', [id]);
+
+    await client.query('DELETE FROM customer_messages WHERE customer_id = $1', [id]);
+    await client.query(
+      `UPDATE customers SET deleted_at = NOW(), updated_at = NOW() WHERE id = $1`,
+      [id]
+    );
 
     await client.query('COMMIT');
 
@@ -120,24 +148,26 @@ const deleteCustomer = async (req, res) => {
   }
 };
 
-
-
 const getCustomerProfile = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const customer = await pool.query('SELECT * FROM customers WHERE id = $1', [id]);
+    const customer = await pool.query(
+      `SELECT ${CUSTOMER_COLUMNS} FROM customers WHERE id = $1 AND deleted_at IS NULL`,
+      [id]
+    );
     if (!customer.rows.length) return res.status(404).json({ success: false, message: 'Customer not found' });
 
     const orders = await pool.query(
-      `SELECT o.*, r.name as rider_name
+      `SELECT DISTINCT ON (o.id) o.*, r.name as rider_name
        FROM orders o
        LEFT JOIN deliveries d ON o.id = d.order_id
        LEFT JOIN riders r ON d.rider_id = r.id
        WHERE o.customer_id = $1
-       ORDER BY o.created_at DESC`,
+       ORDER BY o.id, d.created_at DESC NULLS LAST`,
       [id]
     );
+    orders.rows.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
 
     const stats = await pool.query(
       `SELECT
@@ -169,13 +199,18 @@ const updateCustomerNotes = async (req, res) => {
     const { id } = req.params;
     const { notes } = req.body;
     const result = await pool.query(
-      'UPDATE customers SET notes=$1, updated_at=NOW() WHERE id=$2 RETURNING *',
+      `UPDATE customers SET notes=$1, updated_at=NOW() WHERE id=$2 AND deleted_at IS NULL RETURNING ${CUSTOMER_COLUMNS}`,
       [notes, id]
     );
     if (!result.rows.length) return res.status(404).json({ success: false, message: 'Customer not found' });
     res.json({ success: true, customer: result.rows[0] });
   } catch (error) {
+    console.error('updateCustomerNotes error:', error);
     res.status(500).json({ success: false, message: 'Server error' });
   }
 };
-module.exports = { getCustomers, getCustomer, createCustomer, updateCustomer, deleteCustomer, getCustomerProfile, updateCustomerNotes };
+
+module.exports = {
+  getCustomers, getCustomer, createCustomer, updateCustomer,
+  deleteCustomer, getCustomerProfile, updateCustomerNotes,
+};

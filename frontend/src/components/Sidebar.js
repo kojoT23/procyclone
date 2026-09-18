@@ -34,6 +34,7 @@ const Sidebar = ({ isOpen, onClose }) => {
       links: [
         { to: '/',        label: 'Overview',  icon: '◎', exact: true, permission: null },
         { to: '/orders',  label: 'Orders',    icon: '⊡', permission: 'manage_orders', badge: 'LIVE' },
+        { to: '/returns', label: 'Returns', icon: '↩', permission: 'manage_orders' },
         { to: '/billing', label: 'New Bill',  icon: '💳', permission: null },
         { to: '/receipts',label: 'Receipts',  icon: '🧾', permission: null },
         { to: '/delivery',label: 'Delivery',  icon: '🏍️', permission: 'manage_riders' },

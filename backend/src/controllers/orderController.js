@@ -550,6 +550,60 @@ const updateOrderStatus = async (req, res) => {
       );
     }
 
+    // A 'returned' order means the delivery failed and the goods came back
+    // to base. Money owed is flagged immediately (the customer's refund
+    // doesn't wait on anything), but stock stays OUT of sellable inventory
+    // until the person who handled the return completes an enquiry with
+    // photo evidence — see returnController.js. This exists specifically
+    // to prevent a return being silently written off as "damaged" with no
+    // accountability trail.
+    if (status === 'returned') {
+      const items = await client.query(
+        `SELECT oi.product_id, oi.quantity, p.name as product_name
+         FROM order_items oi LEFT JOIN products p ON oi.product_id = p.id
+         WHERE oi.order_id = $1`,
+        [id]
+      );
+      const itemSummary = items.rows
+        .map(i => `${i.quantity}x ${i.product_name || 'Unknown product'}`)
+        .join(', ');
+      const itemsDetail = items.rows.map(i => ({
+        product_id: i.product_id,
+        product_name: i.product_name || 'Unknown product',
+        quantity_ordered: i.quantity,
+        quantity_received: null,
+      }));
+
+      const paymentResult = await client.query(
+        `UPDATE payments SET status = 'refund_pending', updated_at = NOW()
+         WHERE order_id = $1 AND status = 'verified' RETURNING id`,
+        [id]
+      );
+      const paymentId = paymentResult.rows[0]?.id || null;
+
+      // Find the rider on this delivery, and — if they have a linked
+      // login — assign the enquiry to them so it shows on their own
+      // Rider Portal dashboard. Otherwise it falls to whoever just
+      // marked the order returned.
+      const deliveryRider = await client.query(
+        `SELECT d.rider_id, r.user_id as rider_user_id
+         FROM deliveries d LEFT JOIN riders r ON d.rider_id = r.id
+         WHERE d.order_id = $1 ORDER BY d.created_at DESC LIMIT 1`,
+        [id]
+      );
+      const riderId = deliveryRider.rows[0]?.rider_id || null;
+      const assignedTo = deliveryRider.rows[0]?.rider_user_id || req.user.id;
+
+      await client.query(
+        `INSERT INTO order_returns
+          (order_id, customer_id, item_summary, items_detail, restocked_by, payment_id,
+           refund_status, rider_id, assigned_to, status)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, 'pending_enquiry')`,
+        [id, result.rows[0].customer_id, itemSummary, JSON.stringify(itemsDetail), req.user.id, paymentId,
+         paymentId ? 'pending' : 'none', riderId, assignedTo]
+      );
+    }
+
     await client.query('COMMIT');
 
     /* Queue WhatsApp message for customer */

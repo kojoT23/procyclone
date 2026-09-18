@@ -33,6 +33,7 @@ app.use('/api/inventory', require('./routes/inventoryRoutes'));
 app.use('/api/restock-requests', require('./routes/restockRoutes'));
 app.use('/api/scheduler', require('./routes/schedulerRoutes'));
 app.use('/api/payments', require('./routes/paymentRoutes'));
+app.use('/api/returns', require('./routes/returnRoutes'));
 app.use('/api/business-profile', require('./routes/businessProfileRoutes'));
 app.use('/api/delivery-zones', require('./routes/deliveryZoneRoutes'));
 app.use('/api/pricing-settings', require('./routes/pricingSettingsRoutes'));
@@ -49,7 +50,7 @@ app.use('/api/quick-links', require('./routes/quickLinksRoutes'));
 app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/whatsapp', require('./routes/whatsapp'));
 app.use('/api/telegram', require('./routes/telegram'));
-// app.use('/api/chat', require('./routes/chat')); // disabled — routes/chat.js missing
+app.use('/api/chat', require('./routes/chat'));
 app.use('/api/hr', require('./routes/hr'));
 app.use('/api/webhooks', require('./routes/webhookRoutes'));
 app.get('/', (req, res) => { res.json({ success: true, message: 'Pro Cyclone API is running 🚀', version: '1.0.0' }); });

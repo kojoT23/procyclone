@@ -9,6 +9,9 @@ import Dashboard from './pages/Dashboard';
 import Orders from './pages/Orders';
 import Products from './pages/Products';
 import Customers from './pages/Customers';
+import Returns from './pages/Returns';
+import PortalReturns from './pages/portal/PortalReturns';
+import TransportReturns from './pages/portal/TransportReturns';
 import Riders from './pages/Riders';
 import Cash from './pages/Cash';
 import Staff from './pages/Staff';
@@ -83,6 +86,7 @@ function App() {
           <Route path="/" element={<PrivateRoute><Layout><Dashboard /></Layout></PrivateRoute>} />
           <Route path="/orders" element={<PrivateRoute><Layout><Orders /></Layout></PrivateRoute>} />
           <Route path="/customers" element={<PrivateRoute><Layout><Customers /></Layout></PrivateRoute>} />
+          <Route path="/returns" element={<PrivateRoute><Layout><Returns /></Layout></PrivateRoute>} />
           <Route path="/products" element={<PrivateRoute><Layout><Products /></Layout></PrivateRoute>} />
           <Route path="/inventory" element={<PrivateRoute><Layout><Inventory /></Layout></PrivateRoute>} />
           <Route path="/riders" element={<PrivateRoute><Layout><Riders /></Layout></PrivateRoute>} />
@@ -107,6 +111,7 @@ function App() {
           <Route path="/portal/deliveries" element={<PrivateRoute><PortalLayout><PortalDeliveries /></PortalLayout></PrivateRoute>} />
           <Route path="/portal/schedule" element={<PrivateRoute><PortalLayout><PortalSchedule /></PortalLayout></PrivateRoute>} />
           <Route path="/portal/messages" element={<PrivateRoute><PortalLayout><PortalMessages /></PortalLayout></PrivateRoute>} />
+          <Route path="/portal/returns" element={<PrivateRoute><PortalLayout><PortalReturns /></PortalLayout></PrivateRoute>} />
           <Route path="/portal/profile" element={<PrivateRoute><PortalLayout><PortalProfile /></PortalLayout></PrivateRoute>} />
 
           {/* ── Staff portal routes (super_admin / admin / manager) ──
@@ -139,6 +144,7 @@ function App() {
           <Route path="/transport/deliveries" element={<PrivateRoute><TransportLayout><TransportDeliveries /></TransportLayout></PrivateRoute>} />
           <Route path="/transport/cash" element={<PrivateRoute><TransportLayout><TransportCash /></TransportLayout></PrivateRoute>} />
           <Route path="/transport/messages" element={<PrivateRoute><TransportLayout><TransportMessages /></TransportLayout></PrivateRoute>} />
+          <Route path="/transport/returns" element={<PrivateRoute><TransportLayout><TransportReturns /></TransportLayout></PrivateRoute>} />
           <Route path="/transport/profile" element={<PrivateRoute><TransportLayout><TransportProfile /></TransportLayout></PrivateRoute>} />
           <Route path="/transport/billing" element={<PrivateRoute><TransportLayout><TransportBilling /></TransportLayout></PrivateRoute>} />
           <Route path="/transport/mass-order" element={<PrivateRoute><TransportLayout><TransportMassOrder /></TransportLayout></PrivateRoute>} />

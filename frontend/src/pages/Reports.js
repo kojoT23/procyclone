@@ -316,6 +316,20 @@ const Reports = () => {
                 </div>
               )}
 
+              {/* Refunds owed — money already collected on orders that
+                  came back returned, not yet paid back to the customer */}
+              {revenue.refunds_owed?.count > 0 && (
+                <div className="card" style={{ borderLeft: '4px solid #d97706' }}>
+                  <h3 style={{ fontSize: '15px', fontWeight: '700', margin: '0 0 8px' }}>⚠️ Refunds Owed</h3>
+                  <p style={{ fontSize: '22px', fontWeight: '800', margin: '0 0 4px', color: '#d97706' }}>
+                    GH₵ {parseFloat(revenue.refunds_owed.total || 0).toFixed(2)}
+                  </p>
+                  <p style={{ color: 'var(--text-3)', fontSize: '13px', margin: 0 }}>
+                    {revenue.refunds_owed.count} payment{revenue.refunds_owed.count === 1 ? '' : 's'} pending refund — see the Returns page
+                  </p>
+                </div>
+              )}
+
               {/* Bar chart + daily table */}
               {revenue.daily?.length > 0 && (
                 <div className="card">

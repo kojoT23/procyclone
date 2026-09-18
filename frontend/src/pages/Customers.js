@@ -125,7 +125,7 @@ const Customers = () => {
     try {
       await customersAPI.delete(customer.id);
       fetchCustomers();
-    } catch { alert('Error deleting customer'); }
+    } catch (err) { alert(err.response?.data?.message || 'Error deleting customer'); }
   };
 
   const sendWhatsApp = (phone) => {

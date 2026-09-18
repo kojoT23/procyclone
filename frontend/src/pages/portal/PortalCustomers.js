@@ -102,8 +102,8 @@ export default function PortalCustomers() {
       await customersAPI.delete(customer.id);
       setShowProfile(false);
       fetchCustomers();
-    } catch {
-      alert('Error deleting customer');
+    } catch (err) {
+      alert(err.response?.data?.message || 'Error deleting customer');
     }
   };
 
