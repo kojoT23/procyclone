@@ -9,9 +9,9 @@ const audit = require('../middleware/auditLog');
 
 router.use(protect);
 
-router.get('/', can('manage_orders'), getReturns);
+router.get('/', getReturns);
 
-router.put('/:id/enquiry', can('manage_orders'),
+router.put('/:id/enquiry',
   audit('SUBMIT_RETURN_ENQUIRY', 'order_return',
     (req) => parseInt(req.params.id),
     (req) => `Completed return enquiry — condition: ${req.body.condition}`

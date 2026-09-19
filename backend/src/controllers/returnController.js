@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { hasPermission } = require('../config/roles');
 
 /* ═══════════════════════════════════════════════════════════════
    GET /api/returns
@@ -16,7 +17,17 @@ const getReturns = async (req, res) => {
 
     if (status) { conditions.push(`r.status = $${i}`); values.push(status); i++; }
     if (refund_status) { conditions.push(`r.refund_status = $${i}`); values.push(refund_status); i++; }
-    if (assigned_to === 'me') { conditions.push(`r.assigned_to = $${i}`); values.push(req.user.id); i++; }
+
+    // Someone without staff-level access (a bare rider account) can only
+    // ever see their own assigned returns — regardless of what they
+    // pass in assigned_to. Staff (manage_orders) can see everything, or
+    // narrow to their own with ?assigned_to=me the same as before.
+    const isStaff = await hasPermission(req.user.role, 'manage_orders');
+    if (!isStaff) {
+      conditions.push(`r.assigned_to = $${i}`); values.push(req.user.id); i++;
+    } else if (assigned_to === 'me') {
+      conditions.push(`r.assigned_to = $${i}`); values.push(req.user.id); i++;
+    }
 
     const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
 
