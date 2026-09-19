@@ -30,6 +30,25 @@ export const AuthProvider = ({ children }) => {
     setLoading(false);
   }, []);
 
+  // localStorage is shared across every tab in the same browser. On a
+  // shared device, if Person A leaves a tab open and Person B logs in
+  // on a NEW tab, Person B's login overwrites the shared accessToken —
+  // Person A's tab has no way to know, and on its next request it
+  // silently starts acting as Person B. The 'storage' event only fires
+  // in OTHER tabs (never the one that made the change), which is
+  // exactly what's needed here: the moment any other tab changes the
+  // login state, force this tab to reload so it can never keep
+  // operating under a now-stale identity.
+  useEffect(() => {
+    const handleStorageChange = (e) => {
+      if (e.key === 'accessToken' || e.key === 'user' || e.key === null) {
+        window.location.reload();
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
   const login = async (email, password) => {
     const response = await authAPI.login({ email, password });
     const { accessToken, refreshToken, user } = response.data;
