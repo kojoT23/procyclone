@@ -58,6 +58,7 @@ const TransportMessages = () => {
   const [chatEnabled, setChatEnabled] = useState(true);
   const [conversations, setConversations] = useState([]);
   const [staff, setStaff] = useState([]);
+  const [staffSearch, setStaffSearch] = useState('');
   const [onlineUsers, setOnlineUsers] = useState(new Set());
   const [activeConv, setActiveConv] = useState(null);
   const [messages, setMessages] = useState([]);
@@ -293,16 +294,35 @@ const TransportMessages = () => {
           <button onClick={() => setView('list')} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#1a1a18', padding: 0 }}>←</button>
           <h1 style={{ fontSize: 18, fontWeight: 800, color: '#1a1a18', margin: 0 }}>New Message</h1>
         </div>
-        {staff.map(s => (
-          <div key={s.id} onClick={() => startConversation(s)}
-            style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 8px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}>
-            <Avatar name={s.name} role={s.role} online={isOnline(s.id)} />
-            <div>
-              <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a18' }}>{s.name}</div>
-              <div style={{ fontSize: 12, color: '#9ca3af', textTransform: 'capitalize' }}>{s.role?.replace('_', ' ')}</div>
+        <input
+          type="text"
+          value={staffSearch}
+          onChange={e => setStaffSearch(e.target.value)}
+          placeholder="Search by name…"
+          autoFocus
+          style={{
+            width: '100%', padding: '10px 14px', borderRadius: 10,
+            border: '1px solid #e5e7eb', fontSize: 14, marginBottom: 12, boxSizing: 'border-box',
+          }}
+        />
+        {(() => {
+          const filtered = staff.filter(s =>
+            s.name?.toLowerCase().includes(staffSearch.toLowerCase()) ||
+            s.role?.toLowerCase().includes(staffSearch.toLowerCase())
+          );
+          if (staff.length === 0) return <p style={{ textAlign: 'center', color: '#9ca3af', padding: 20 }}>No staff available</p>;
+          if (filtered.length === 0) return <p style={{ textAlign: 'center', color: '#9ca3af', padding: 20 }}>No match for "{staffSearch}"</p>;
+          return filtered.map(s => (
+            <div key={s.id} onClick={() => startConversation(s)}
+              style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 8px', cursor: 'pointer', borderBottom: '1px solid #f3f4f6' }}>
+              <Avatar name={s.name} role={s.role} online={isOnline(s.id)} />
+              <div>
+                <div style={{ fontSize: 14, fontWeight: 700, color: '#1a1a18' }}>{s.name}</div>
+                <div style={{ fontSize: 12, color: '#9ca3af', textTransform: 'capitalize' }}>{s.role?.replace('_', ' ')}</div>
+              </div>
             </div>
-          </div>
-        ))}
+          ));
+        })()}
       </div>
     );
   }
@@ -345,7 +365,7 @@ const TransportMessages = () => {
         ))
       )}
 
-      <button onClick={() => setView('staff')}
+      <button onClick={() => { setStaffSearch(''); setView('staff'); }}
         style={{
           position: 'fixed', bottom: 78, right: 20, width: 52, height: 52, borderRadius: '50%',
           background: '#22c55e', color: '#fff', border: 'none', fontSize: 24, cursor: 'pointer',

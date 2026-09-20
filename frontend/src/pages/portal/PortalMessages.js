@@ -39,6 +39,7 @@ export default function PortalMessages() {
   const [showNewChat, setShowNewChat] = useState(false);
   const [showEmoji, setShowEmoji] = useState(false);
   const [staff, setStaff] = useState([]);
+  const [newChatSearch, setNewChatSearch] = useState('');
   const socketRef = useRef(null);
   const messagesEndRef = useRef(null);
   const inputRef = useRef(null);
@@ -138,6 +139,7 @@ export default function PortalMessages() {
       const res = await chatAPI.getStaff();
       const allowed = ['super_admin', 'admin', 'manager', 'dispatcher'];
       setStaff((res.data.staff || []).filter(s => s.id !== user?.id && allowed.includes(s.role)));
+      setNewChatSearch('');
       setShowNewChat(true);
     } catch (e) { console.error(e); }
   };
@@ -244,19 +246,39 @@ export default function PortalMessages() {
               <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700 }}>Start a conversation</h3>
               <button onClick={() => setShowNewChat(false)} style={{ background: 'none', border: 'none', fontSize: 20, cursor: 'pointer', color: '#6b7280' }}>✕</button>
             </div>
+            <div style={{ padding: '12px 20px 0', position: 'sticky', top: 53, background: '#fff', zIndex: 1 }}>
+              <input
+                type="text"
+                value={newChatSearch}
+                onChange={e => setNewChatSearch(e.target.value)}
+                placeholder="Search by name…"
+                autoFocus
+                style={{
+                  width: '100%', padding: '10px 14px', borderRadius: 10,
+                  border: '1px solid #e5e7eb', fontSize: 14, boxSizing: 'border-box',
+                }}
+              />
+            </div>
             <div style={{ padding: '8px 0' }}>
-              {staff.length === 0 && <p style={{ textAlign: 'center', color: '#6b7280', padding: 20 }}>No staff available</p>}
-              {staff.map(s => (
-                <div key={s.id} onClick={() => startNewChat(s)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', cursor: 'pointer', borderBottom: '1px solid #f9f9f8' }}>
-                  <div style={{ width: 42, height: 42, borderRadius: '50%', background: roleColor(s.role), display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 16, flexShrink: 0 }}>
-                    {s.name?.charAt(0).toUpperCase()}
+              {(() => {
+                const filtered = staff.filter(s =>
+                  s.name?.toLowerCase().includes(newChatSearch.toLowerCase()) ||
+                  s.role?.toLowerCase().includes(newChatSearch.toLowerCase())
+                );
+                if (staff.length === 0) return <p style={{ textAlign: 'center', color: '#6b7280', padding: 20 }}>No staff available</p>;
+                if (filtered.length === 0) return <p style={{ textAlign: 'center', color: '#6b7280', padding: 20 }}>No match for "{newChatSearch}"</p>;
+                return filtered.map(s => (
+                  <div key={s.id} onClick={() => startNewChat(s)} style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px', cursor: 'pointer', borderBottom: '1px solid #f9f9f8' }}>
+                    <div style={{ width: 42, height: 42, borderRadius: '50%', background: roleColor(s.role), display: 'flex', alignItems: 'center', justifyContent: 'center', color: '#fff', fontWeight: 700, fontSize: 16, flexShrink: 0 }}>
+                      {s.name?.charAt(0).toUpperCase()}
+                    </div>
+                    <div>
+                      <div style={{ fontWeight: 600, fontSize: 14 }}>{s.name}</div>
+                      <div style={{ fontSize: 12, color: '#6b7280', textTransform: 'capitalize' }}>{s.role?.replace('_', ' ')}</div>
+                    </div>
                   </div>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: 14 }}>{s.name}</div>
-                    <div style={{ fontSize: 12, color: '#6b7280', textTransform: 'capitalize' }}>{s.role?.replace('_', ' ')}</div>
-                  </div>
-                </div>
-              ))}
+                ));
+              })()}
             </div>
           </div>
         </>
