@@ -160,6 +160,155 @@ const EditProductModal = ({ product, token, onClose, onSaved }) => {
   );
 };
 
+/* ─── Checkout modal ─────────────────────────────────────────────── */
+const CheckoutModal = ({ cart, token, onClose, onCompleted }) => {
+  const [paymentMethod, setPaymentMethod] = useState('cash');
+  const [paymentReference, setPaymentReference] = useState('');
+  const [customerName, setCustomerName] = useState('');
+  const [customerPhone, setCustomerPhone] = useState('');
+  const [discount, setDiscount] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  const subtotal = cart.reduce((s, i) => s + i.price * i.quantity, 0);
+  const discountAmount = parseFloat(discount) || 0;
+  const total = Math.max(subtotal - discountAmount, 0);
+
+  const handleComplete = async () => {
+    if (paymentMethod === 'momo' && !paymentReference.trim()) {
+      setError('MoMo reference is required');
+      return;
+    }
+    setSaving(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/pos/sales`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        body: JSON.stringify({
+          items: cart.map(i => ({ product_id: i.id, quantity: i.quantity })),
+          payment_method: paymentMethod,
+          payment_reference: paymentReference || null,
+          discount: discountAmount,
+          customer_name: customerName || null,
+          customer_phone: customerPhone || null,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.message || 'Sale failed');
+      onCompleted(data.sale);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1100 }} onClick={onClose}>
+      <div style={{ background: '#fff', borderRadius: 14, padding: 24, width: 420, maxWidth: '90vw', maxHeight: '85vh', overflowY: 'auto' }} onClick={e => e.stopPropagation()}>
+        <h3 style={{ margin: '0 0 16px' }}>Checkout</h3>
+
+        <div style={{ marginBottom: 16 }}>
+          {cart.map(item => (
+            <div key={item.id} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0' }}>
+              <span>{item.quantity}x {item.name}</span>
+              <span>GH₵ {(item.price * item.quantity).toFixed(2)}</span>
+            </div>
+          ))}
+        </div>
+
+        <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Payment Method</label>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 8, marginBottom: 12 }}>
+          {['cash', 'momo', 'card'].map(m => (
+            <button key={m} onClick={() => setPaymentMethod(m)}
+              style={{
+                padding: 10, borderRadius: 8, fontWeight: 700, fontSize: 13, cursor: 'pointer', textTransform: 'uppercase',
+                border: paymentMethod === m ? '2px solid #111827' : '1px solid #e5e7eb',
+                background: paymentMethod === m ? '#111827' : '#fff',
+                color: paymentMethod === m ? '#fff' : '#374151',
+              }}>{m}</button>
+          ))}
+        </div>
+
+        {paymentMethod === 'momo' && (
+          <>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>MoMo Reference</label>
+            <input value={paymentReference} onChange={e => setPaymentReference(e.target.value)}
+              style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 12, boxSizing: 'border-box' }} />
+          </>
+        )}
+
+        <div style={{ display: 'flex', gap: 10, marginBottom: 12 }}>
+          <div style={{ flex: 1 }}>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Customer (optional)</label>
+            <input value={customerName} onChange={e => setCustomerName(e.target.value)} placeholder="Name"
+              style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid #e5e7eb', boxSizing: 'border-box' }} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>&nbsp;</label>
+            <input value={customerPhone} onChange={e => setCustomerPhone(e.target.value)} placeholder="Phone"
+              style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid #e5e7eb', boxSizing: 'border-box' }} />
+          </div>
+        </div>
+
+        <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>Discount (GH₵)</label>
+        <input type="number" step="0.01" value={discount} onChange={e => setDiscount(e.target.value)} placeholder="0.00"
+          style={{ width: '100%', padding: 10, borderRadius: 8, border: '1px solid #e5e7eb', marginBottom: 16, boxSizing: 'border-box' }} />
+
+        <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, marginBottom: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#6b7280' }}>
+            <span>Subtotal</span><span>GH₵ {subtotal.toFixed(2)}</span>
+          </div>
+          {discountAmount > 0 && (
+            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, color: '#dc2626' }}>
+              <span>Discount</span><span>-GH₵ {discountAmount.toFixed(2)}</span>
+            </div>
+          )}
+          <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 18, fontWeight: 800, marginTop: 4 }}>
+            <span>Total</span><span>GH₵ {total.toFixed(2)}</span>
+          </div>
+        </div>
+
+        {error && <p style={{ color: '#dc2626', fontSize: 13, marginBottom: 12 }}>{error}</p>}
+
+        <div style={{ display: 'flex', gap: 8 }}>
+          <button onClick={onClose} style={{ flex: 1, padding: 12, borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', fontWeight: 700, cursor: 'pointer' }}>Cancel</button>
+          <button onClick={handleComplete} disabled={saving} style={{ flex: 1, padding: 12, borderRadius: 8, border: 'none', background: '#16a34a', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>
+            {saving ? 'Processing…' : `Complete Sale`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+/* ─── Receipt ────────────────────────────────────────────────────── */
+const Receipt = ({ sale, onClose }) => (
+  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.5)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1200 }} onClick={onClose}>
+    <div style={{ background: '#fff', borderRadius: 14, padding: 28, width: 340, textAlign: 'center' }} onClick={e => e.stopPropagation()}>
+      <div style={{ fontSize: 40, marginBottom: 8 }}>✅</div>
+      <h3 style={{ margin: '0 0 4px' }}>Sale Complete</h3>
+      <p style={{ color: '#6b7280', fontSize: 13, margin: '0 0 20px' }}>{sale.sale_number}</p>
+      <div style={{ textAlign: 'left', marginBottom: 16 }}>
+        {(typeof sale.items === 'string' ? JSON.parse(sale.items) : sale.items).map((item, idx) => (
+          <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 13, padding: '4px 0' }}>
+            <span>{item.quantity}x {item.product_name}</span>
+            <span>GH₵ {parseFloat(item.subtotal).toFixed(2)}</span>
+          </div>
+        ))}
+      </div>
+      <div style={{ borderTop: '1px solid #e5e7eb', paddingTop: 12, marginBottom: 20 }}>
+        <div style={{ fontSize: 22, fontWeight: 800 }}>GH₵ {parseFloat(sale.total_amount).toFixed(2)}</div>
+        <div style={{ fontSize: 12, color: '#6b7280', textTransform: 'uppercase' }}>{sale.payment_method}</div>
+      </div>
+      <button onClick={onClose} style={{ width: '100%', padding: 12, borderRadius: 8, border: 'none', background: '#111827', color: '#fff', fontWeight: 700, cursor: 'pointer' }}>
+        New Sale
+      </button>
+    </div>
+  </div>
+);
+
 /* ─── Product dashboard ─────────────────────────────────────────── */
 const ProductDashboard = ({ token, user, onLogout }) => {
   const [products, setProducts] = useState([]);
@@ -167,6 +316,31 @@ const ProductDashboard = ({ token, user, onLogout }) => {
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState(null);
   const [error, setError] = useState('');
+  const [cart, setCart] = useState([]);
+  const [checkingOut, setCheckingOut] = useState(false);
+  const [receipt, setReceipt] = useState(null);
+
+  const addToCart = (product) => {
+    setCart(prev => {
+      const existing = prev.find(i => i.id === product.id);
+      const currentQty = existing ? existing.quantity : 0;
+      if (currentQty + 1 > product.stock_quantity) return prev; // can't exceed stock
+      if (existing) {
+        return prev.map(i => i.id === product.id ? { ...i, quantity: i.quantity + 1 } : i);
+      }
+      return [...prev, { id: product.id, name: product.name, price: parseFloat(product.price), quantity: 1, maxStock: product.stock_quantity }];
+    });
+  };
+
+  const updateCartQty = (id, qty) => {
+    setCart(prev => {
+      if (qty <= 0) return prev.filter(i => i.id !== id);
+      return prev.map(i => i.id === id ? { ...i, quantity: Math.min(qty, i.maxStock) } : i);
+    });
+  };
+
+  const cartTotal = cart.reduce((s, i) => s + i.price * i.quantity, 0);
+  const cartCount = cart.reduce((s, i) => s + i.quantity, 0);
 
   const fetchProducts = useCallback(async () => {
     setLoading(true);
@@ -260,9 +434,23 @@ const ProductDashboard = ({ token, user, onLogout }) => {
                       </span>
                     </td>
                     <td style={{ padding: '10px 14px' }}>
-                      <button onClick={() => setEditing(p)} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
-                        Edit
-                      </button>
+                      <div style={{ display: 'flex', gap: 6 }}>
+                        <button
+                          onClick={() => addToCart(p)}
+                          disabled={p.stock_quantity <= 0}
+                          style={{
+                            padding: '6px 12px', borderRadius: 6, border: 'none',
+                            background: p.stock_quantity > 0 ? '#16a34a' : '#e5e7eb',
+                            color: p.stock_quantity > 0 ? '#fff' : '#9ca3af',
+                            cursor: p.stock_quantity > 0 ? 'pointer' : 'not-allowed', fontSize: 12, fontWeight: 600,
+                          }}
+                        >
+                          + Cart
+                        </button>
+                        <button onClick={() => setEditing(p)} style={{ padding: '6px 12px', borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', cursor: 'pointer', fontSize: 12, fontWeight: 600 }}>
+                          Edit
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -270,7 +458,38 @@ const ProductDashboard = ({ token, user, onLogout }) => {
             </table>
           </div>
         )}
+        {cart.length > 0 && <div style={{ height: 80 }} />}
       </div>
+
+      {cart.length > 0 && (
+        <div style={{
+          position: 'fixed', bottom: 0, left: 0, right: 0, background: '#111827', color: '#fff',
+          padding: '14px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+          boxShadow: '0 -4px 20px rgba(0,0,0,.15)', flexWrap: 'wrap', gap: 12,
+        }}>
+          <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
+            <strong>{cartCount} item{cartCount === 1 ? '' : 's'} · GH₵ {cartTotal.toFixed(2)}</strong>
+            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+              {cart.map(item => (
+                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#1f2937', borderRadius: 8, padding: '4px 8px', fontSize: 12 }}>
+                  <span>{item.name}</span>
+                  <button onClick={() => updateCartQty(item.id, item.quantity - 1)} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14 }}>−</button>
+                  <span>{item.quantity}</span>
+                  <button onClick={() => updateCartQty(item.id, item.quantity + 1)} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14 }}>+</button>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div style={{ display: 'flex', gap: 8 }}>
+            <button onClick={() => setCart([])} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #374151', background: 'transparent', color: '#fff', cursor: 'pointer', fontSize: 13 }}>
+              Clear
+            </button>
+            <button onClick={() => setCheckingOut(true)} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: '#16a34a', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
+              Checkout →
+            </button>
+          </div>
+        </div>
+      )}
 
       {editing && (
         <EditProductModal
@@ -282,6 +501,24 @@ const ProductDashboard = ({ token, user, onLogout }) => {
             setEditing(null);
           }}
         />
+      )}
+
+      {checkingOut && (
+        <CheckoutModal
+          cart={cart}
+          token={token}
+          onClose={() => setCheckingOut(false)}
+          onCompleted={(sale) => {
+            setCheckingOut(false);
+            setCart([]);
+            setReceipt(sale);
+            fetchProducts(); // stock just changed — refresh the table
+          }}
+        />
+      )}
+
+      {receipt && (
+        <Receipt sale={receipt} onClose={() => setReceipt(null)} />
       )}
     </div>
   );

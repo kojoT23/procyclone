@@ -51,6 +51,7 @@ app.use('/api/notifications', require('./routes/notifications'));
 app.use('/api/whatsapp', require('./routes/whatsapp'));
 app.use('/api/telegram', require('./routes/telegram'));
 app.use('/api/chat', require('./routes/chat'));
+app.use('/api/pos', require('./routes/posRoutes'));
 app.use('/api/hr', require('./routes/hr'));
 app.use('/api/webhooks', require('./routes/webhookRoutes'));
 app.get('/', (req, res) => { res.json({ success: true, message: 'Pro Cyclone API is running 🚀', version: '1.0.0' }); });
