@@ -10,6 +10,7 @@ const audit = require('../middleware/auditLog');
 
 // ── PUBLIC ROUTE (no auth) ──
 router.get('/public', getPublicProducts);
+router.get('/public/barcode/:code', getProductByBarcode);
 
 // ── PROTECTED ROUTES ──
 router.use(protect);

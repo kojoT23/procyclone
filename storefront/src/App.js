@@ -118,7 +118,7 @@ const TopNav = ({ cartCount, onCartOpen, search, onSearch }) => (
         <i className="ti ti-bell" aria-hidden="true" />
         Alerts
       </button>
-      <button className="fs-topnav-btn" onClick={onCartOpen}>
+      <button className="fs-topnav-btn fs-topnav-cart-btn" onClick={onCartOpen}>
         <i className="ti ti-shopping-cart" aria-hidden="true" />
         Cart
         {cartCount > 0 && <span className="fs-cart-badge">{cartCount}</span>}
@@ -276,9 +276,34 @@ const ProductCard = ({ product, onAdd, onClick, wishlist, onWishlist }) => {
 
 // ── CART DRAWER ──
 const CartDrawer = ({ open, onClose, items, onQty, onRemove, total }) => {
+  const [ticket, setTicket] = useState(null);
+  const [checkingOut, setCheckingOut] = useState(false);
+  const [selfCheckoutError, setSelfCheckoutError] = useState('');
+
   const handleCheckout = () => {
     if (!items.length) return;
     window.open(buildWAMessage(items, total), '_blank');
+  };
+
+  const handleSelfCheckout = async () => {
+    if (!items.length) return;
+    setCheckingOut(true);
+    setSelfCheckoutError('');
+    try {
+      const res = await fetch(`${API_BASE}/api/pos/self-checkout`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ items: items.map(i => ({ product_id: i.id, quantity: i.qty })) }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.message || 'Could not create ticket');
+      setTicket(data.sale);
+      items.forEach(i => onRemove(i.id)); // ticket's issued — clear the cart so it can't be double-submitted
+    } catch (err) {
+      setSelfCheckoutError(err.message);
+    } finally {
+      setCheckingOut(false);
+    }
   };
 
   return (
@@ -338,11 +363,53 @@ const CartDrawer = ({ open, onClose, items, onQty, onRemove, total }) => {
             <i className="ti ti-brand-whatsapp" aria-hidden="true" />
             Checkout on WhatsApp
           </button>
+          <button
+            className="fs-wa-checkout-btn"
+            onClick={handleSelfCheckout}
+            disabled={!items.length || checkingOut}
+            style={{ background: '#111827', marginTop: 8 }}
+          >
+            {checkingOut ? 'Getting your ticket…' : "🏪 I'm in the store — Self-Checkout"}
+          </button>
+          {selfCheckoutError && (
+            <p style={{ color: '#dc2626', fontSize: 13, marginTop: 8, textAlign: 'center' }}>{selfCheckoutError}</p>
+          )}
           <div className="fs-cart-trust">
             <span>🔒 100% Secure</span>
             <span>📱 MoMo Accepted</span>
           </div>
         </div>
+
+        {ticket && (
+          <div style={{
+            position: 'fixed', inset: 0, background: '#fff', zIndex: 2000,
+            display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: 24, textAlign: 'center',
+          }}>
+            <div style={{ fontSize: 56, marginBottom: 12 }}>🎫</div>
+            <h2 style={{ margin: '0 0 4px' }}>Show this to a cashier</h2>
+            <p style={{ color: '#6b7280', marginBottom: 24 }}>They'll ring you up and take your payment</p>
+            <div style={{ background: '#f9fafb', border: '2px dashed #d1d5db', borderRadius: 12, padding: '20px 32px', marginBottom: 24 }}>
+              <div style={{ fontSize: 28, fontWeight: 800, letterSpacing: 1 }}>{ticket.sale_number}</div>
+            </div>
+            <div style={{ width: '100%', maxWidth: 320, marginBottom: 24, textAlign: 'left' }}>
+              {(typeof ticket.items === 'string' ? JSON.parse(ticket.items) : ticket.items).map((item, idx) => (
+                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: 14, padding: '4px 0' }}>
+                  <span>{item.quantity}x {item.product_name}</span>
+                  <span>GH₵ {parseFloat(item.subtotal).toFixed(2)}</span>
+                </div>
+              ))}
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 800, fontSize: 18, borderTop: '1px solid #e5e7eb', marginTop: 8, paddingTop: 8 }}>
+                <span>Total</span><span>GH₵ {parseFloat(ticket.total_amount).toFixed(2)}</span>
+              </div>
+            </div>
+            <button
+              onClick={() => { setTicket(null); onClose(); }}
+              style={{ padding: '12px 32px', borderRadius: 10, border: 'none', background: '#111827', color: '#fff', fontWeight: 700, cursor: 'pointer' }}
+            >
+              Done
+            </button>
+          </div>
+        )}
       </div>
     </>
   );
@@ -573,6 +640,63 @@ const BottomNav = ({ onCartOpen, cartCount }) => (
 );
 
 // ── ROOT APP ──
+// ── BARCODE SCANNER ──
+// A physical USB/Bluetooth scanner acts like a keyboard: it types the
+// barcode digits (fast) and sends Enter. This input just needs to be
+// focused to catch that — no special scanner API or driver needed.
+const BarcodeScanner = ({ onFound }) => {
+  const [value, setValue] = useState('');
+  const [feedback, setFeedback] = useState(null); // { ok: bool, text: string }
+  const [looking, setLooking] = useState(false);
+  const inputRef = React.useRef();
+
+  const lookup = async (code) => {
+    if (!code.trim()) return;
+    setLooking(true);
+    setFeedback(null);
+    try {
+      const res = await fetch(`${API_BASE}/api/products/public/barcode/${encodeURIComponent(code.trim())}`);
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setFeedback({ ok: false, text: data.message || 'Barcode not found' });
+      } else if (data.product.stock_quantity <= 0) {
+        setFeedback({ ok: false, text: `${data.product.name} — out of stock` });
+      } else {
+        onFound(data.product);
+        setFeedback({ ok: true, text: `Added: ${data.product.name}` });
+      }
+    } catch (err) {
+      setFeedback({ ok: false, text: 'Could not reach the server' });
+    } finally {
+      setLooking(false);
+      setValue('');
+      setTimeout(() => setFeedback(null), 2200);
+      inputRef.current?.focus();
+    }
+  };
+
+  return (
+    <div className="fs-scanner">
+      <i className="ti ti-barcode fs-scanner-icon" aria-hidden="true" />
+      <input
+        ref={inputRef}
+        type="text"
+        className="fs-scanner-input"
+        placeholder="Scan a barcode or type the code…"
+        value={value}
+        disabled={looking}
+        onChange={e => setValue(e.target.value)}
+        onKeyDown={e => { if (e.key === 'Enter') lookup(value); }}
+      />
+      {feedback && (
+        <span className={`fs-scanner-feedback ${feedback.ok ? 'ok' : 'err'}`}>
+          {feedback.ok ? '✅' : '⚠️'} {feedback.text}
+        </span>
+      )}
+    </div>
+  );
+};
+
 export default function App() {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -633,30 +757,10 @@ export default function App() {
       <SubNav activeNav={activeNav} onNavChange={setActiveNav} />
       <HeroSlider productCount={products.length} />
       <CategoryStrip active={activeCategory} onChange={setActiveCategory} />
+      <BarcodeScanner onFound={addToCart} />
 
-      {/* Deals of the Day */}
-      {deals.length > 0 && (
-        <div className="fs-section">
-          <div className="fs-section-header">
-            <div className="fs-section-title">🔥 Deals of the Day</div>
-            <button className="fs-section-link">View All Deals</button>
-          </div>
-          <div className="fs-product-grid">
-            {deals.map(p => (
-              <ProductCard
-                key={p.id}
-                product={p}
-                onAdd={addToCart}
-                onClick={setSelectedProduct}
-                wishlist={wishlist}
-                onWishlist={toggleWishlist}
-              />
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* All Products */}
+      {/* Product Grid — one unified POS-style grid; deals/discounts already
+          show inline via the badge on each card, no separate section needed */}
       <div className="fs-section">
         <div className="fs-section-header">
           <div className="fs-section-title">
@@ -691,7 +795,6 @@ export default function App() {
         )}
       </div>
 
-      <WhyShop />
       <Footer />
 
       <BottomNav onCartOpen={() => setCartOpen(true)} cartCount={cartCount} />

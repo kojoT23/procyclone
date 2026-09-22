@@ -1579,3 +1579,49 @@ img { max-width: 100%; display: block; }
   .fs-why-grid { grid-template-columns: repeat(2, 1fr); }
   .fs-topnav-btn span { display: none; }
 }
+/* ── POS-style permanent cart sidebar (desktop only) ──
+   Below 1024px the cart stays a drawer that opens on tap — there's
+   no room for a permanent sidebar on a phone/tablet screen. */
+@media (min-width: 1024px) {
+  .fs-app { padding-right: 400px; }
+  .fs-cart-drawer {
+    right: 0 !important;
+    box-shadow: -2px 0 16px rgba(0,0,0,.06);
+    border-left: 1px solid var(--border, #e5e7eb);
+  }
+  .fs-cart-close { display: none; }
+  .fs-topnav-cart-btn { display: none; }
+}
+
+/* ── Barcode scanner panel ── */
+.fs-scanner {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface);
+  border: 2px solid var(--border, #e5e7eb);
+  border-radius: 12px;
+  padding: 12px 16px;
+  margin: 12px 20px;
+  position: relative;
+}
+.fs-scanner-icon { font-size: 22px; color: var(--accent, #16a34a); }
+.fs-scanner-input {
+  flex: 1;
+  border: none;
+  outline: none;
+  font-size: 15px;
+  background: transparent;
+}
+.fs-scanner-feedback {
+  position: absolute;
+  right: 16px;
+  top: 50%;
+  transform: translateY(-50%);
+  font-size: 13px;
+  font-weight: 700;
+  padding: 4px 10px;
+  border-radius: 8px;
+}
+.fs-scanner-feedback.ok { background: #dcfce7; color: #15803d; }
+.fs-scanner-feedback.err { background: #fee2e2; color: #dc2626; }
