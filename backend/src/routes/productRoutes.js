@@ -15,11 +15,11 @@ router.get('/public/barcode/:code', getProductByBarcode);
 // ── PROTECTED ROUTES ──
 router.use(protect);
 
-router.get('/', authorize('super_admin','admin','manager','warehouse','sales','rider','customer_support'), getProducts);
-router.get('/categories', authorize('super_admin','admin','manager','warehouse','sales','rider','customer_support'), getCategories);
+router.get('/', authorize('super_admin','admin','manager','warehouse','sales','rider','customer_support','cashier'), getProducts);
+router.get('/categories', authorize('super_admin','admin','manager','warehouse','sales','rider','customer_support','cashier'), getCategories);
 router.get('/ai/trending-suggestions', authorize('super_admin','admin','manager','warehouse'), getTrendingSuggestions);
-router.get('/barcode/:code', authorize('super_admin','admin','manager','warehouse','sales','customer_support'), getProductByBarcode);
-router.get('/:id', authorize('super_admin','admin','manager','warehouse','sales','customer_support'), getProduct);
+router.get('/barcode/:code', authorize('super_admin','admin','manager','warehouse','sales','customer_support','cashier'), getProductByBarcode);
+router.get('/:id', authorize('super_admin','admin','manager','warehouse','sales','customer_support','cashier'), getProduct);
 
 router.post('/', authorize('super_admin','admin','manager','warehouse'), createProductValidation,
   audit('CREATE_PRODUCT', 'product',

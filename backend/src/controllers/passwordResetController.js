@@ -57,7 +57,10 @@ const requestReset = async (req, res) => {
     // Send email
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${token}`;
 
-    await resend.emails.send({
+    // Resend reports failures in the returned `error` instead of throwing, so
+    // before this a bounced/blocked email still looked like a success. Now the
+    // real reason is printed in the backend terminal.
+    const { error: sendError } = await resend.emails.send({
       from: 'Shorewinds <onboarding@resend.dev>',
       to: user.email,
       subject: 'Shorewinds — Password Reset Request',
@@ -77,6 +80,7 @@ const requestReset = async (req, res) => {
         </div>
       `,
     });
+    if (sendError) console.error('Password reset email NOT sent to', user.email, '—', sendError);
 
     res.json({
       success: true,
@@ -134,7 +138,7 @@ const resetPassword = async (req, res) => {
     try {
       await client.query('BEGIN');
       await client.query(
-        'UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2',
+        'UPDATE users SET password = $1, token_version = token_version + 1, updated_at = NOW() WHERE id = $2',
         [hashedPassword, result.rows[0].user_id]
       );
       await client.query(
