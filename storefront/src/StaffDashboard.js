@@ -1,15 +1,64 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 
 const API_BASE = 'http://localhost:5001';
+
+// Asks the backend for a new access token using the long-lived refresh
+// token — so an expired session can usually be healed silently instead
+// of forcing staff to type their password again mid-shift. Returns null
+// (never throws) if the refresh token itself is invalid/expired.
+const refreshAccessToken = async (refreshToken) => {
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/refresh`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+    });
+    const data = await res.json();
+    if (!res.ok || !data.success) return null;
+    return data.accessToken;
+  } catch {
+    return null;
+  }
+};
+
+// Builds a single `request(url, options)` used for every authenticated
+// staff call. It injects the Authorization header itself (always off a
+// ref, so it's never stale right after a refresh), and on a 401 tries
+// ONE silent refresh + retry before giving up and signing out. This is
+// what lets a staff member re-open the dashboard mid-shift and land
+// straight on the register instead of hitting a login screen.
+const useAuthenticatedRequest = (token, refreshToken, onNewToken, onLogout) => {
+  const tokenRef = useRef(token);
+  useEffect(() => { tokenRef.current = token; }, [token]);
+
+  return useCallback(async (url, options = {}) => {
+    const withAuth = (t) => ({ ...options, headers: { ...(options.headers || {}), Authorization: `Bearer ${t}` } });
+    let res = await fetch(url, withAuth(tokenRef.current));
+    if (res.status === 401 && refreshToken) {
+      const newToken = await refreshAccessToken(refreshToken);
+      if (newToken) {
+        tokenRef.current = newToken;
+        onNewToken(newToken);
+        res = await fetch(url, withAuth(newToken));
+      }
+    }
+    if (res.status === 401) {
+      onLogout();
+      throw new Error('Your session expired — please sign in again.');
+    }
+    return res;
+  }, [refreshToken, onNewToken, onLogout]);
+};
 
 /* ─── Auth ──────────────────────────────────────────────────────── */
 const useStaffAuth = () => {
   const [token, setToken] = useState(() => localStorage.getItem('staffToken'));
+  const [refreshToken, setRefreshToken] = useState(() => localStorage.getItem('staffRefreshToken'));
   const [user, setUser] = useState(() => {
     try { return JSON.parse(localStorage.getItem('staffUser') || 'null'); } catch { return null; }
   });
 
-  const login = async (email, password) => {
+  const login = useCallback(async (email, password) => {
     const res = await fetch(`${API_BASE}/api/auth/login`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -18,19 +67,33 @@ const useStaffAuth = () => {
     const data = await res.json();
     if (!res.ok || !data.success) throw new Error(data.message || 'Login failed');
     localStorage.setItem('staffToken', data.accessToken);
+    localStorage.setItem('staffRefreshToken', data.refreshToken);
     localStorage.setItem('staffUser', JSON.stringify(data.user));
     setToken(data.accessToken);
+    setRefreshToken(data.refreshToken);
     setUser(data.user);
-  };
+  }, []);
 
-  const logout = () => {
+  // Called by useAuthenticatedRequest right after a silent refresh
+  // succeeds, so the new access token survives a page reload too.
+  // Stable identity (useCallback, no deps) — request() depends on this,
+  // and an unstable identity here would rebuild request() every render
+  // and re-trigger every polling effect that depends on it.
+  const updateToken = useCallback((newToken) => {
+    localStorage.setItem('staffToken', newToken);
+    setToken(newToken);
+  }, []);
+
+  const logout = useCallback(() => {
     localStorage.removeItem('staffToken');
+    localStorage.removeItem('staffRefreshToken');
     localStorage.removeItem('staffUser');
     setToken(null);
+    setRefreshToken(null);
     setUser(null);
-  };
+  }, []);
 
-  return { token, user, login, logout };
+  return { token, refreshToken, user, login, logout, updateToken };
 };
 
 /* ─── Login screen ──────────────────────────────────────────────── */
@@ -79,7 +142,7 @@ const StaffLogin = ({ onLogin }) => {
 };
 
 /* ─── Edit product modal ────────────────────────────────────────── */
-const EditProductModal = ({ product, token, onClose, onSaved }) => {
+const EditProductModal = ({ product, request, onClose, onSaved }) => {
   const [form, setForm] = useState({
     name: product.name || '',
     price: product.price || '',
@@ -97,9 +160,9 @@ const EditProductModal = ({ product, token, onClose, onSaved }) => {
     setSaving(true);
     setError('');
     try {
-      const res = await fetch(`${API_BASE}/api/products/${product.id}`, {
+      const res = await request(`${API_BASE}/api/products/${product.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(form),
       });
       const data = await res.json();
@@ -161,7 +224,7 @@ const EditProductModal = ({ product, token, onClose, onSaved }) => {
 };
 
 /* ─── Checkout modal ─────────────────────────────────────────────── */
-const CheckoutModal = ({ cart, token, onClose, onCompleted }) => {
+const CheckoutModal = ({ cart, request, onClose, onCompleted }) => {
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentReference, setPaymentReference] = useState('');
   const [customerName, setCustomerName] = useState('');
@@ -182,9 +245,9 @@ const CheckoutModal = ({ cart, token, onClose, onCompleted }) => {
     setSaving(true);
     setError('');
     try {
-      const res = await fetch(`${API_BASE}/api/pos/sales`, {
+      const res = await request(`${API_BASE}/api/pos/sales`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           items: cart.map(i => ({ product_id: i.id, quantity: i.quantity })),
           payment_method: paymentMethod,
@@ -310,8 +373,122 @@ const Receipt = ({ sale, onClose }) => (
 );
 
 /* ─── Product dashboard ─────────────────────────────────────────── */
-const ProductDashboard = ({ token, user, onLogout }) => {
-  const [view, setView] = useState('products'); // 'products' | 'tickets' | 'barcodes'
+/* ─── Register panel — running tally as a cashier rings up a sale ── */
+const RegisterPanel = ({ cart, cartTotal, cartCount, onQty, onRemove, onClear, onCheckout }) => (
+  <div
+    style={{
+      width: 340, flexShrink: 0, position: 'sticky', top: 20,
+      background: '#fff', border: '1px solid #e5e7eb', borderRadius: 12,
+      display: 'flex', flexDirection: 'column', maxHeight: 'calc(100vh - 40px)',
+    }}
+  >
+    <div style={{ padding: '16px 18px', borderBottom: '1px solid #e5e7eb' }}>
+      <div style={{ fontWeight: 800, fontSize: 15 }}>🧾 Current Sale</div>
+      <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+        {cartCount} item{cartCount === 1 ? '' : 's'} tallied
+      </div>
+    </div>
+
+    <div style={{ flex: 1, overflowY: 'auto', padding: '8px 10px' }}>
+      {cart.length === 0 ? (
+        <div style={{ textAlign: 'center', color: '#9ca3af', fontSize: 13, padding: '28px 10px' }}>
+          Scan or tap "+ Cart" on a product to start a sale.
+        </div>
+      ) : (
+        cart.map(item => (
+          <div
+            key={item.id}
+            style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '10px 8px', borderBottom: '1px solid #f3f4f6', gap: 8,
+            }}
+          >
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={{ fontWeight: 600, fontSize: 13, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{item.name}</div>
+              <div style={{ fontSize: 11, color: '#9ca3af' }}>GH₵ {item.price.toFixed(2)} each</div>
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <button onClick={() => onQty(item.id, item.quantity - 1)} style={{ width: 24, height: 24, borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', cursor: 'pointer', fontSize: 14, lineHeight: 1 }}>−</button>
+              <span style={{ minWidth: 18, textAlign: 'center', fontWeight: 700, fontSize: 13 }}>{item.quantity}</span>
+              <button onClick={() => onQty(item.id, item.quantity + 1)} disabled={item.quantity >= item.maxStock} style={{ width: 24, height: 24, borderRadius: 6, border: '1px solid #e5e7eb', background: '#fff', cursor: item.quantity >= item.maxStock ? 'not-allowed' : 'pointer', fontSize: 14, lineHeight: 1, opacity: item.quantity >= item.maxStock ? 0.4 : 1 }}>+</button>
+            </div>
+            <div style={{ width: 64, textAlign: 'right', fontWeight: 700, fontSize: 13 }}>
+              GH₵ {(item.price * item.quantity).toFixed(2)}
+            </div>
+            <button onClick={() => onRemove(item.id)} style={{ background: 'none', border: 'none', color: '#d1d5db', cursor: 'pointer', fontSize: 14, padding: '0 2px' }}>✕</button>
+          </div>
+        ))
+      )}
+    </div>
+
+    <div style={{ padding: '14px 18px', borderTop: '1px solid #e5e7eb' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 12, color: '#6b7280', marginBottom: 4 }}>
+        <span>Items</span><span>{cartCount}</span>
+      </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginBottom: 12 }}>
+        <span style={{ fontSize: 13, fontWeight: 700 }}>Total</span>
+        <span style={{ fontSize: 26, fontWeight: 900, letterSpacing: -0.5 }}>GH₵ {cartTotal.toFixed(2)}</span>
+      </div>
+      <button
+        onClick={onCheckout}
+        disabled={!cart.length}
+        style={{
+          width: '100%', padding: 14, borderRadius: 10, border: 'none', marginBottom: 8,
+          background: cart.length ? '#16a34a' : '#e5e7eb', color: cart.length ? '#fff' : '#9ca3af',
+          fontWeight: 800, fontSize: 15, cursor: cart.length ? 'pointer' : 'not-allowed',
+        }}
+      >
+        Checkout →
+      </button>
+      <button
+        onClick={onClear}
+        disabled={!cart.length}
+        style={{
+          width: '100%', padding: 10, borderRadius: 10, border: '1px solid #e5e7eb', background: '#fff',
+          color: '#6b7280', fontWeight: 600, fontSize: 13, cursor: cart.length ? 'pointer' : 'not-allowed',
+        }}
+      >
+        Clear Sale
+      </button>
+    </div>
+  </div>
+);
+
+// Staff screens sign out after this long with no touch, click or typing, so a
+// tablet left logged in (or lent to someone) can't be used for long. A
+// barcode scanner counts as typing, so normal checkout work never trips it.
+const IDLE_LIMIT_MS = 30 * 60 * 1000; // change 30 to however many minutes you want
+const IDLE_WARN_MS = 60 * 1000;       // countdown banner shows for the last minute
+
+const useIdleLogout = (onLogout) => {
+  const [secondsLeft, setSecondsLeft] = useState(null); // null = no warning showing
+  const lastActivity = useRef(Date.now());
+
+  useEffect(() => {
+    const touch = () => { lastActivity.current = Date.now(); };
+    const events = ['mousedown', 'keydown', 'touchstart', 'scroll', 'click'];
+    events.forEach(e => window.addEventListener(e, touch, { passive: true }));
+    // Checks the clock every second rather than trusting one long timer, so a
+    // laptop that slept still signs out the moment it wakes up.
+    const timer = setInterval(() => {
+      const remaining = IDLE_LIMIT_MS - (Date.now() - lastActivity.current);
+      if (remaining <= 0) { onLogout(); return; }
+      setSecondsLeft(remaining <= IDLE_WARN_MS ? Math.ceil(remaining / 1000) : null);
+    }, 1000);
+    return () => {
+      events.forEach(e => window.removeEventListener(e, touch));
+      clearInterval(timer);
+    };
+  }, [onLogout]);
+
+  return secondsLeft;
+};
+
+const ProductDashboard = ({ token, refreshToken, user, onLogout, onNewToken }) => {
+  const request = useAuthenticatedRequest(token, refreshToken, onNewToken, onLogout);
+  const idleSecondsLeft = useIdleLogout(onLogout);
+  const [view, setView] = useState('products'); // 'products' | 'tickets' | 'barcodes' | 'assistance'
+  const [assistCount, setAssistCount] = useState(0);
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -343,16 +520,29 @@ const ProductDashboard = ({ token, user, onLogout }) => {
   const cartTotal = cart.reduce((s, i) => s + i.price * i.quantity, 0);
   const cartCount = cart.reduce((s, i) => s + i.quantity, 0);
 
+  // Badge count on the Assistance tab — polls independently of whether
+  // that tab is open, so a teller on the Products tab still sees it.
+  useEffect(() => {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const res = await request(`${API_BASE}/api/assistance?status=pending`);
+        const data = await res.json();
+        if (!cancelled && data.success) setAssistCount((data.requests || []).length);
+      } catch (e) { /* badge is best-effort, don't surface errors */ }
+    };
+    poll();
+    const interval = setInterval(poll, 15000);
+    return () => { cancelled = true; clearInterval(interval); };
+  }, [request]);
+
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     setError('');
     try {
       const params = new URLSearchParams({ limit: '100' });
       if (search) params.set('search', search);
-      const res = await fetch(`${API_BASE}/api/products?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.status === 401) { onLogout(); return; }
+      const res = await request(`${API_BASE}/api/products?${params}`);
       const data = await res.json();
       if (!data.success) throw new Error(data.message || 'Failed to load products');
       setProducts(data.products || []);
@@ -361,7 +551,7 @@ const ProductDashboard = ({ token, user, onLogout }) => {
     } finally {
       setLoading(false);
     }
-  }, [token, search, onLogout]);
+  }, [request, search]);
 
   useEffect(() => {
     const t = setTimeout(fetchProducts, 300); // debounce search
@@ -370,6 +560,14 @@ const ProductDashboard = ({ token, user, onLogout }) => {
 
   return (
     <div style={{ minHeight: '100vh', background: '#f8f9fb', fontFamily: 'system-ui, sans-serif' }}>
+      {idleSecondsLeft !== null && (
+        <div style={{ position: 'fixed', top: 16, left: '50%', transform: 'translateX(-50%)', zIndex: 3000, background: '#111827', color: '#fff', padding: '12px 18px', borderRadius: 12, boxShadow: '0 6px 24px rgba(0,0,0,.3)', fontSize: 14, display: 'flex', gap: 14, alignItems: 'center' }}>
+          <span>Signing out in {idleSecondsLeft}s because of inactivity</span>
+          <button type="button" style={{ padding: '6px 12px', borderRadius: 8, border: 'none', background: '#fff', color: '#111827', fontWeight: 700, cursor: 'pointer' }}>
+            Stay signed in
+          </button>
+        </div>
+      )}
       <div style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '16px 24px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
         <div>
           <h1 style={{ margin: 0, fontSize: 18 }}>Product Dashboard</h1>
@@ -381,7 +579,7 @@ const ProductDashboard = ({ token, user, onLogout }) => {
       </div>
 
       <div style={{ background: '#fff', borderBottom: '1px solid #e5e7eb', padding: '0 24px', display: 'flex', gap: 4 }}>
-        {['products', 'tickets', 'barcodes'].map(v => (
+        {['products', 'tickets', 'barcodes', 'assistance'].map(v => (
           <button
             key={v}
             onClick={() => setView(v)}
@@ -392,18 +590,23 @@ const ProductDashboard = ({ token, user, onLogout }) => {
               borderBottom: view === v ? '2px solid #111827' : '2px solid transparent',
             }}
           >
-            {v === 'products' ? 'Products' : v === 'tickets' ? 'Self-Checkout Tickets' : 'Barcode Labels'}
+            {v === 'products' ? 'Products' : v === 'tickets' ? 'Self-Checkout Tickets' : v === 'barcodes' ? 'Barcode Labels' : (
+              <>Assistance{assistCount > 0 && <span style={{ marginLeft: 6, background: '#dc2626', color: '#fff', borderRadius: 999, padding: '1px 7px', fontSize: 11 }}>{assistCount}</span>}</>
+            )}
           </button>
         ))}
       </div>
 
       {view === 'barcodes' ? (
-        <BarcodeLabels token={token} />
+        <BarcodeLabels request={request} />
       ) : view === 'tickets' ? (
-        <PendingTickets token={token} />
+        <PendingTickets request={request} />
+      ) : view === 'assistance' ? (
+        <AssistanceRequests request={request} />
       ) : (
       <>
-      <div style={{ padding: 24, maxWidth: 1100, margin: '0 auto' }}>
+      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 20, padding: 24, maxWidth: 1440, margin: '0 auto' }}>
+      <div style={{ flex: 1, minWidth: 0 }}>
         <input
           type="text" placeholder="Search products…" value={search}
           onChange={e => setSearch(e.target.value)}
@@ -482,43 +685,22 @@ const ProductDashboard = ({ token, user, onLogout }) => {
             </table>
           </div>
         )}
-        {cart.length > 0 && <div style={{ height: 80 }} />}
       </div>
-
-      {cart.length > 0 && (
-        <div style={{
-          position: 'fixed', bottom: 0, left: 0, right: 0, background: '#111827', color: '#fff',
-          padding: '14px 24px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
-          boxShadow: '0 -4px 20px rgba(0,0,0,.15)', flexWrap: 'wrap', gap: 12,
-        }}>
-          <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-            <strong>{cartCount} item{cartCount === 1 ? '' : 's'} · GH₵ {cartTotal.toFixed(2)}</strong>
-            <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
-              {cart.map(item => (
-                <div key={item.id} style={{ display: 'flex', alignItems: 'center', gap: 6, background: '#1f2937', borderRadius: 8, padding: '4px 8px', fontSize: 12 }}>
-                  <span>{item.name}</span>
-                  <button onClick={() => updateCartQty(item.id, item.quantity - 1)} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14 }}>−</button>
-                  <span>{item.quantity}</span>
-                  <button onClick={() => updateCartQty(item.id, item.quantity + 1)} style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: 14 }}>+</button>
-                </div>
-              ))}
-            </div>
-          </div>
-          <div style={{ display: 'flex', gap: 8 }}>
-            <button onClick={() => setCart([])} style={{ padding: '10px 16px', borderRadius: 8, border: '1px solid #374151', background: 'transparent', color: '#fff', cursor: 'pointer', fontSize: 13 }}>
-              Clear
-            </button>
-            <button onClick={() => setCheckingOut(true)} style={{ padding: '10px 20px', borderRadius: 8, border: 'none', background: '#16a34a', color: '#fff', cursor: 'pointer', fontSize: 13, fontWeight: 700 }}>
-              Checkout →
-            </button>
-          </div>
-        </div>
-      )}
+      <RegisterPanel
+        cart={cart}
+        cartTotal={cartTotal}
+        cartCount={cartCount}
+        onQty={updateCartQty}
+        onRemove={(id) => updateCartQty(id, 0)}
+        onClear={() => setCart([])}
+        onCheckout={() => setCheckingOut(true)}
+      />
+      </div>
 
       {editing && (
         <EditProductModal
           product={editing}
-          token={token}
+          request={request}
           onClose={() => setEditing(null)}
           onSaved={(updated) => {
             setProducts(prev => prev.map(p => p.id === updated.id ? updated : p));
@@ -530,7 +712,7 @@ const ProductDashboard = ({ token, user, onLogout }) => {
       {checkingOut && (
         <CheckoutModal
           cart={cart}
-          token={token}
+          request={request}
           onClose={() => setCheckingOut(false)}
           onCompleted={(sale) => {
             setCheckingOut(false);
@@ -551,7 +733,114 @@ const ProductDashboard = ({ token, user, onLogout }) => {
 };
 
 /* ─── Pending self-checkout tickets ─────────────────────────────── */
-const ConfirmTicketModal = ({ ticket, token, onClose, onConfirmed }) => {
+/* ─── Assistance requests (customer called for help) ───────────── */
+const AssistanceRequests = ({ request }) => {
+  const [requests, setRequests] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [busyId, setBusyId] = useState(null);
+  const [loadError, setLoadError] = useState('');
+
+  // Failures are shown on screen, not swallowed — a wrong-role 403, a rate
+  // limit 429 or a server error used to look identical to "no requests".
+  const fetchRequests = useCallback(async () => {
+    try {
+      const res = await request(`${API_BASE}/api/assistance?status=pending`);
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.success) {
+        setLoadError(`Could not load requests (HTTP ${res.status}${data.message ? ` — ${data.message}` : ''})`);
+      } else {
+        setLoadError('');
+        setRequests(data.requests || []);
+      }
+    } catch (e) {
+      console.error(e);
+      setLoadError(`Could not load requests — ${e.message}`);
+    }
+    finally { setLoading(false); }
+  }, [request]);
+
+  useEffect(() => {
+    fetchRequests();
+    const interval = setInterval(fetchRequests, 8000); // same cadence as Pending Tickets
+    return () => clearInterval(interval);
+  }, [fetchRequests]);
+
+  const act = async (id, action) => {
+    setBusyId(id);
+    try {
+      const res = await request(`${API_BASE}/api/assistance/${id}/${action}`, {
+        method: 'PUT',
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) throw new Error(data.message || 'Could not update request');
+      setRequests(prev => action === 'resolve' ? prev.filter(r => r.id !== id) : prev.map(r => r.id === id ? data.request : r));
+    } catch (err) {
+      alert(err.message);
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const timeAgo = (iso) => {
+    const mins = Math.max(0, Math.round((Date.now() - new Date(iso).getTime()) / 60000));
+    return mins < 1 ? 'just now' : `${mins} min ago`;
+  };
+
+  return (
+    <div style={{ padding: 24, maxWidth: 800, margin: '0 auto' }}>
+      <h2 style={{ fontSize: 18, marginBottom: 4 }}>🙋 Assistance Requests</h2>
+      <p style={{ fontSize: 13, color: '#6b7280', marginBottom: 16 }}>Customers calling for help at a self-checkout kiosk. Refreshes automatically.</p>
+      {loadError && (
+        <div style={{ background: '#fef2f2', color: '#b91c1c', borderRadius: 10, padding: '10px 14px', fontSize: 13, marginBottom: 14 }}>
+          {loadError}
+        </div>
+      )}
+      {loading ? (
+        <p style={{ color: '#6b7280' }}>Loading…</p>
+      ) : requests.length === 0 ? (
+        !loadError && <div style={{ textAlign: 'center', padding: '40px 0', color: '#9ca3af' }}>No open requests right now.</div>
+      ) : (
+        requests.map(r => (
+          <div
+            key={r.id}
+            style={{
+              display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+              padding: '14px 16px', borderRadius: 10, border: '1px solid #e5e7eb', marginBottom: 10,
+              background: r.status === 'acknowledged' ? '#f9fafb' : '#fffbeb',
+            }}
+          >
+            <div>
+              <div style={{ fontWeight: 700, fontSize: 14 }}>{r.reason || 'Needs assistance'}</div>
+              <div style={{ fontSize: 12, color: '#6b7280', marginTop: 2 }}>
+                {timeAgo(r.requested_at)}{r.status === 'acknowledged' ? ' · being handled' : ''}
+              </div>
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              {r.status === 'pending' && (
+                <button
+                  onClick={() => act(r.id, 'acknowledge')}
+                  disabled={busyId === r.id}
+                  style={{ padding: '8px 14px', borderRadius: 8, border: '1px solid #e5e7eb', background: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+                >
+                  On my way
+                </button>
+              )}
+              <button
+                onClick={() => act(r.id, 'resolve')}
+                disabled={busyId === r.id}
+                style={{ padding: '8px 14px', borderRadius: 8, border: 'none', background: '#16a34a', color: '#fff', fontWeight: 700, fontSize: 13, cursor: 'pointer' }}
+              >
+                Resolved
+              </button>
+            </div>
+          </div>
+        ))
+      )}
+    </div>
+  );
+};
+
+const ConfirmTicketModal = ({ ticket, request, onClose, onConfirmed }) => {
   const [paymentMethod, setPaymentMethod] = useState('cash');
   const [paymentReference, setPaymentReference] = useState('');
   const [saving, setSaving] = useState(false);
@@ -565,9 +854,9 @@ const ConfirmTicketModal = ({ ticket, token, onClose, onConfirmed }) => {
     setSaving(true);
     setError('');
     try {
-      const res = await fetch(`${API_BASE}/api/pos/sales/${ticket.id}/confirm`, {
+      const res = await request(`${API_BASE}/api/pos/sales/${ticket.id}/confirm`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ payment_method: paymentMethod, payment_reference: paymentReference || null }),
       });
       const data = await res.json();
@@ -669,7 +958,7 @@ const printLabel = (product) => {
   win.document.close();
 };
 
-const BarcodeLabels = ({ token }) => {
+const BarcodeLabels = ({ request }) => {
   const [products, setProducts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(null);
@@ -678,12 +967,12 @@ const BarcodeLabels = ({ token }) => {
   const fetchProducts = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/products?limit=200`, { headers: { Authorization: `Bearer ${token}` } });
+      const res = await request(`${API_BASE}/api/products?limit=200`);
       const data = await res.json();
       if (data.success) setProducts(data.products || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [request]);
 
   useEffect(() => { fetchProducts(); }, [fetchProducts]);
 
@@ -691,9 +980,9 @@ const BarcodeLabels = ({ token }) => {
     setGenerating(product.id);
     try {
       const barcode = generateEAN13(product.id);
-      const res = await fetch(`${API_BASE}/api/products/${product.id}`, {
+      const res = await request(`${API_BASE}/api/products/${product.id}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ barcode }),
       });
       const data = await res.json();
@@ -763,7 +1052,7 @@ const BarcodeLabels = ({ token }) => {
   );
 };
 
-const PendingTickets = ({ token }) => {
+const PendingTickets = ({ request }) => {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [confirming, setConfirming] = useState(null);
@@ -771,14 +1060,12 @@ const PendingTickets = ({ token }) => {
   const fetchTickets = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await fetch(`${API_BASE}/api/pos/sales?status=pending_payment`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const res = await request(`${API_BASE}/api/pos/sales?status=pending_payment`);
       const data = await res.json();
       if (data.success) setTickets(data.sales || []);
     } catch (e) { console.error(e); }
     finally { setLoading(false); }
-  }, [token]);
+  }, [request]);
 
   useEffect(() => {
     fetchTickets();
@@ -821,7 +1108,7 @@ const PendingTickets = ({ token }) => {
       {confirming && (
         <ConfirmTicketModal
           ticket={confirming}
-          token={token}
+          request={request}
           onClose={() => setConfirming(null)}
           onConfirmed={() => { setConfirming(null); fetchTickets(); }}
         />
@@ -831,10 +1118,51 @@ const PendingTickets = ({ token }) => {
 };
 
 /* ─── Entry point ────────────────────────────────────────────────── */
+// Staff tools (register panel, product table, barcode labels) are laid out
+// for tablet/desktop screens only. Below this width — i.e. phones — show a
+// notice instead of a cramped, unusable register. 768px matches the
+// storefront's own phone/tablet breakpoint. Tracks live width so rotating
+// a tablet or resizing a desktop window switches views immediately, and
+// never touches the saved session, so nothing is lost either way.
+const STAFF_MIN_WIDTH = 768;
+
+const useIsPhoneWidth = () => {
+  const [isPhone, setIsPhone] = useState(() => window.innerWidth < STAFF_MIN_WIDTH);
+  useEffect(() => {
+    const onResize = () => setIsPhone(window.innerWidth < STAFF_MIN_WIDTH);
+    window.addEventListener('resize', onResize);
+    window.addEventListener('orientationchange', onResize);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      window.removeEventListener('orientationchange', onResize);
+    };
+  }, []);
+  return isPhone;
+};
+
 const StaffDashboard = () => {
-  const { token, user, login, logout } = useStaffAuth();
+  // All hooks first, THEN any early return — returning before a hook runs
+  // would change the hook count when the window is resized.
+  const { token, refreshToken, user, login, logout, updateToken } = useStaffAuth();
+  const isPhone = useIsPhoneWidth();
+
+  if (isPhone) {
+    return (
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: 24, background: '#f9fafb', textAlign: 'center' }}>
+        <div style={{ maxWidth: 340 }}>
+          <div style={{ fontSize: 44, marginBottom: 8 }}>🖥️</div>
+          <h2 style={{ margin: '0 0 8px', fontSize: 18 }}>Staff tools need a bigger screen</h2>
+          <p style={{ margin: '0 0 16px', fontSize: 14, color: '#6b7280', lineHeight: 1.5 }}>
+            The register and staff dashboard work on a tablet or desktop. Please switch to one of those devices, or rotate your tablet to landscape.
+          </p>
+          <a href="/" style={{ fontSize: 14, color: '#111827', fontWeight: 700 }}>← Back to the store</a>
+        </div>
+      </div>
+    );
+  }
+
   if (!token || !user) return <StaffLogin onLogin={login} />;
-  return <ProductDashboard token={token} user={user} onLogout={logout} />;
+  return <ProductDashboard token={token} refreshToken={refreshToken} user={user} onLogout={logout} onNewToken={updateToken} />;
 };
 
 export default StaffDashboard;

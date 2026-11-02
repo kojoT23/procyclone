@@ -8,6 +8,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const pool = require('./config/db');
 const app = express();
+app.set('trust proxy', parseInt(process.env.TRUST_PROXY_HOPS || '0', 10));
 const server = http.createServer(app);
 const io = new Server(server, {
   cors: { origin: process.env.ALLOWED_ORIGINS?.split(',') || ['http://localhost:3000'], credentials: true },
@@ -52,7 +53,10 @@ app.use('/api/whatsapp', require('./routes/whatsapp'));
 app.use('/api/telegram', require('./routes/telegram'));
 app.use('/api/chat', require('./routes/chat'));
 app.use('/api/pos', require('./routes/posRoutes'));
+app.use('/api/storefront', require('./routes/storefrontRoutes'));
+app.use('/api/promo', require('./routes/promoRoutes'));
 app.use('/api/hr', require('./routes/hr'));
+app.use('/api/assistance', require('./routes/assistanceRoutes'));
 app.use('/api/webhooks', require('./routes/webhookRoutes'));
 app.get('/', (req, res) => { res.json({ success: true, message: 'Pro Cyclone API is running 🚀', version: '1.0.0' }); });
 app.get('/health', async (req, res) => { try { await pool.query('SELECT NOW()'); res.json({ success: true, message: 'Server and database are healthy ✅' }); } catch (error) { res.status(500).json({ success: false, message: 'Database connection failed ❌' }); } });

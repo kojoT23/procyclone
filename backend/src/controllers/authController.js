@@ -7,8 +7,12 @@ const env = require('../config/env');
 const generateAccessToken = (id) =>
   jwt.sign({ id }, env.jwt.secret, { expiresIn: env.jwt.expiresIn });
 
-const generateRefreshToken = (id) =>
-  jwt.sign({ id }, env.jwt.refreshSecret, { expiresIn: env.jwt.refreshExpiresIn });
+// `tv` is the user's token_version at the moment of login. Bumping
+// users.token_version later (password change, or by hand in SQL) makes every
+// refresh token issued before that point stop working immediately — that is
+// the "sign out everywhere" switch.
+const generateRefreshToken = (id, tv = 0) =>
+  jwt.sign({ id, tv }, env.jwt.refreshSecret, { expiresIn: env.jwt.refreshExpiresIn });
 
 const loginValidation = [
   body('email').isEmail().normalizeEmail().withMessage('Valid email is required'),
@@ -62,7 +66,7 @@ const login = async (req, res) => {
     await logLoginAttempt({ userId: user.id, email, success: true, req });
     await pool.query('UPDATE users SET last_login = NOW() WHERE id = $1', [user.id]);
     const accessToken = generateAccessToken(user.id);
-    const refreshToken = generateRefreshToken(user.id);
+    const refreshToken = generateRefreshToken(user.id, user.token_version || 0);
 
     let portalAccess = false;
     if (user.role === 'rider') {
@@ -104,11 +108,16 @@ const refreshToken = async (req, res) => {
     }
     const decoded = jwt.verify(token, env.jwt.refreshSecret);
     const result = await pool.query(
-      'SELECT id, name, email, role, phone FROM users WHERE id = $1 AND is_active = true',
+      'SELECT id, name, email, role, phone, token_version FROM users WHERE id = $1 AND is_active = true',
       [decoded.id]
     );
     if (result.rows.length === 0) {
       return res.status(401).json({ success: false, message: 'User not found or inactive' });
+    }
+    // Tokens issued before this feature have no `tv`, which counts as 0 — so
+    // nobody is logged out by the upgrade itself, only by a later version bump.
+    if ((decoded.tv ?? 0) !== (result.rows[0].token_version ?? 0)) {
+      return res.status(401).json({ success: false, message: 'Session ended — please sign in again' });
     }
     const accessToken = generateAccessToken(decoded.id);
     res.json({ success: true, accessToken });
@@ -137,7 +146,7 @@ const changePassword = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(newPassword, salt);
     await pool.query(
-      'UPDATE users SET password = $1, updated_at = NOW() WHERE id = $2',
+      'UPDATE users SET password = $1, token_version = token_version + 1, updated_at = NOW() WHERE id = $2',
       [hashedPassword, req.user.id]
     );
     res.json({ success: true, message: 'Password changed successfully' });

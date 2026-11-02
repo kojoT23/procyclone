@@ -1,4 +1,5 @@
 const pool = require('../config/db');
+const { normalizeGhanaPhone } = require('../utils/phoneValidation');
 
 const CUSTOMER_COLUMNS = 'id, name, phone, email, address, notes, created_at, updated_at';
 
@@ -63,9 +64,13 @@ const createCustomer = async (req, res) => {
     if (!name || !phone) {
       return res.status(400).json({ success: false, message: 'Name and phone are required' });
     }
+    const normalizedPhone = normalizeGhanaPhone(phone);
+    if (!normalizedPhone) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid Ghana phone number, e.g. 0244123456' });
+    }
     const result = await pool.query(
       `INSERT INTO customers (name, phone, email, address) VALUES ($1, $2, $3, $4) RETURNING ${CUSTOMER_COLUMNS}`,
-      [name, phone, email || null, address || null]
+      [name, normalizedPhone, email || null, address || null]
     );
     res.status(201).json({ success: true, message: 'Customer created', customer: result.rows[0] });
   } catch (error) {
@@ -84,10 +89,14 @@ const updateCustomer = async (req, res) => {
     if (!name || !phone) {
       return res.status(400).json({ success: false, message: 'Name and phone are required' });
     }
+    const normalizedPhone = normalizeGhanaPhone(phone);
+    if (!normalizedPhone) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid Ghana phone number, e.g. 0244123456' });
+    }
     const result = await pool.query(
       `UPDATE customers SET name=$1, phone=$2, email=$3, address=$4, updated_at=NOW()
        WHERE id=$5 AND deleted_at IS NULL RETURNING ${CUSTOMER_COLUMNS}`,
-      [name, phone, email || null, address || null, id]
+      [name, normalizedPhone, email || null, address || null, id]
     );
     if (result.rows.length === 0) {
       return res.status(404).json({ success: false, message: 'Customer not found' });

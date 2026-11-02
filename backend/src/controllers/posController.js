@@ -1,4 +1,26 @@
 const pool = require('../config/db');
+const { findOrRestoreOrCreateCustomer } = require('../utils/customerLookup');
+const { isValidGhanaPhone, normalizeGhanaPhone } = require('../utils/phoneValidation');
+
+/* ═══════════════════════════════════════════════════════════════
+   Discount limits for staff-typed sales: the biggest discount each
+   role may give on one sale, as a % of that sale's subtotal. Above it
+   the sale is refused and has to be rung up by someone higher. Any
+   role not listed here (including new ones) can give no discount.
+   Change the numbers to suit the shop.
+═══════════════════════════════════════════════════════════════ */
+const MAX_DISCOUNT_PERCENT = {
+  super_admin: 100,
+  admin: 100,
+  manager: 25,
+  cashier: 10,
+  sales: 10,
+};
+
+const maxDiscountFor = (role, subtotal) => {
+  const pct = MAX_DISCOUNT_PERCENT[role] ?? 0;
+  return Math.round(subtotal * pct) / 100; // pct% of subtotal, to the pesewa
+};
 
 const generateSaleNumber = async (client) => {
   const today = new Date().toISOString().slice(0, 10).replace(/-/g, '');
@@ -30,7 +52,23 @@ const createSale = async (req, res) => {
       return res.status(400).json({ success: false, message: 'Payment method must be cash, momo, or card' });
     }
 
+    if (customer_phone && !isValidGhanaPhone(customer_phone)) {
+      await client.query('ROLLBACK').catch(() => {});
+      return res.status(400).json({ success: false, message: 'Please enter a valid Ghana phone number, e.g. 0244123456' });
+    }
+
     await client.query('BEGIN');
+
+    // Same find/restore/create pattern as selfCheckout and the storefront
+    // webhook — a staff-typed sale with a customer name+phone now links to
+    // a real customers row instead of just free-text fields.
+    let customerId = null;
+    if (customer_phone && customer_name) {
+      customerId = await findOrRestoreOrCreateCustomer(client, {
+        name: customer_name,
+        phone: customer_phone,
+      });
+    }
 
     const saleItems = [];
     let subtotal = 0;
@@ -76,17 +114,31 @@ const createSale = async (req, res) => {
     }
 
     const discountAmount = parseFloat(discount) || 0;
+    if (discountAmount < 0) {
+      await client.query('ROLLBACK');
+      return res.status(400).json({ success: false, message: 'Discount cannot be negative' });
+    }
+    const allowedDiscount = maxDiscountFor(req.user.role, subtotal);
+    if (discountAmount > allowedDiscount) {
+      await client.query('ROLLBACK');
+      return res.status(403).json({
+        success: false,
+        message: allowedDiscount > 0
+          ? `Your limit on this sale is GH₵${allowedDiscount.toFixed(2)} off — a manager must approve a bigger discount.`
+          : 'Your role cannot give discounts — ask a manager.',
+      });
+    }
     const totalAmount = Math.max(subtotal - discountAmount, 0);
     const saleNumber = await generateSaleNumber(client);
 
     const result = await client.query(
       `INSERT INTO pos_sales
         (sale_number, cashier_id, items, subtotal, discount, total_amount,
-         payment_method, payment_reference, customer_name, customer_phone, notes)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+         payment_method, payment_reference, customer_name, customer_phone, customer_id, notes)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        RETURNING *`,
       [saleNumber, req.user.id, JSON.stringify(saleItems), subtotal, discountAmount, totalAmount,
-       payment_method, payment_reference || null, customer_name || null, customer_phone || null, notes || null]
+       payment_method, payment_reference || null, customer_name || null, customer_phone || null, customerId, notes || null]
     );
 
     await client.query('COMMIT');
@@ -175,7 +227,10 @@ const getSummary = async (req, res) => {
 ═══════════════════════════════════════════════════════════════ */
 const selfCheckout = async (req, res) => {
   try {
-    const { items } = req.body;
+    const { items, customer_name, customer_phone } = req.body;
+    if (customer_phone && !isValidGhanaPhone(customer_phone)) {
+      return res.status(400).json({ success: false, message: 'Please enter a valid Ghana phone number, e.g. 0244123456' });
+    }
     if (!Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ success: false, message: 'At least one item is required' });
     }
@@ -207,18 +262,31 @@ const selfCheckout = async (req, res) => {
 
     const client = await pool.connect();
     let saleNumber;
+    let customerId = null;
     try {
       await client.query('BEGIN');
       saleNumber = await generateSaleNumber(client);
+      // A self-checkout customer only gives a phone, not a full
+      // address — findOrRestoreOrCreateCustomer is fine with that,
+      // it just won't overwrite an existing address with nothing.
+      if (customer_phone && customer_name) {
+        customerId = await findOrRestoreOrCreateCustomer(client, {
+          name: customer_name,
+          phone: customer_phone,
+        });
+      }
       await client.query('COMMIT');
+    } catch (err) {
+      await client.query('ROLLBACK');
+      throw err;
     } finally {
       client.release();
     }
 
     const result = await pool.query(
-      `INSERT INTO pos_sales (sale_number, items, subtotal, discount, total_amount, status)
-       VALUES ($1, $2, $3, 0, $3, 'pending_payment') RETURNING *`,
-      [saleNumber, JSON.stringify(saleItems), subtotal]
+      `INSERT INTO pos_sales (sale_number, items, subtotal, discount, total_amount, status, customer_name, customer_phone, customer_id)
+       VALUES ($1, $2, $3, 0, $3, 'pending_payment', $4, $5, $6) RETURNING *`,
+      [saleNumber, JSON.stringify(saleItems), subtotal, customer_name || null, customer_phone || null, customerId]
     );
 
     res.status(201).json({ success: true, sale: result.rows[0] });
@@ -291,4 +359,43 @@ const confirmSale = async (req, res) => {
   }
 };
 
-module.exports = { createSale, getSales, getSummary, selfCheckout, confirmSale };
+/* ═══════════════════════════════════════════════════════════════
+   GET /api/pos/order-history?phone=0244123456 — PUBLIC, no login.
+   A customer looks up their own self-checkout ticket history by
+   phone. Matches on customer_id (post-linkage tickets) OR the raw
+   customer_phone string (older tickets created before that linkage
+   existed), so history doesn't silently drop pre-migration orders.
+   Note: this only covers self-checkout/POS tickets, not online
+   delivery orders placed via WhatsApp — those live in a separate
+   `orders` flow this endpoint doesn't touch.
+═══════════════════════════════════════════════════════════════ */
+const getOrderHistoryByPhone = async (req, res) => {
+  try {
+    const { phone } = req.query;
+    if (!phone || !isValidGhanaPhone(phone)) {
+      return res.status(400).json({ success: false, message: 'A valid Ghana phone number is required' });
+    }
+    const normalizedPhone = normalizeGhanaPhone(phone);
+
+    const customer = await pool.query(
+      'SELECT id FROM customers WHERE phone = $1 AND deleted_at IS NULL',
+      [normalizedPhone]
+    );
+    const customerId = customer.rows[0]?.id || null;
+
+    const sales = await pool.query(
+      `SELECT sale_number, items, subtotal, discount, total_amount, status, created_at
+       FROM pos_sales
+       WHERE customer_id = $1 OR customer_phone = $2
+       ORDER BY created_at DESC LIMIT 20`,
+      [customerId, normalizedPhone]
+    );
+
+    res.json({ success: true, orders: sales.rows });
+  } catch (error) {
+    console.error('getOrderHistoryByPhone error:', error);
+    res.status(500).json({ success: false, message: 'Server error' });
+  }
+};
+
+module.exports = { createSale, getSales, getSummary, selfCheckout, confirmSale, getOrderHistoryByPhone };

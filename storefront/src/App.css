@@ -194,15 +194,13 @@ img { max-width: 100%; display: block; }
 .fs-subnav-link:hover { color: var(--white); background: rgba(255,255,255,0.1); }
 .fs-subnav-link.active { color: var(--white); background: var(--accent); }
 
-.fs-currency-btn {
+.fs-currency-label {
   margin-left: auto;
-  background: none;
   border: 1px solid rgba(255,255,255,0.2);
   color: rgba(255,255,255,0.75);
   font-size: 12px;
   padding: 4px 10px;
   border-radius: 4px;
-  cursor: pointer;
   white-space: nowrap;
   flex-shrink: 0;
 }
@@ -475,6 +473,15 @@ img { max-width: 100%; display: block; }
   align-items: center;
   justify-content: space-between;
   margin-bottom: 14px;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+}
+
+.fs-section-header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .fs-section-title {
@@ -483,6 +490,11 @@ img { max-width: 100%; display: block; }
   color: var(--text);
   display: flex;
   align-items: center;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 100%;
   gap: 6px;
   letter-spacing: -0.3px;
 }
@@ -513,16 +525,125 @@ img { max-width: 100%; display: block; }
   border-radius: var(--radius-lg);
   overflow: hidden;
   cursor: pointer;
-  transition: transform 0.2s, box-shadow 0.2s;
+  transition: box-shadow 0.2s;
   position: relative;
   border: 1px solid var(--border);
 }
 
-.fs-card:hover { transform: translateY(-3px); box-shadow: var(--shadow); }
+.fs-card:hover { box-shadow: var(--shadow); }
+
+/* ── Flip card wrapper — tap-to-flip, not hover-based, since the
+   primary target device is a touchscreen tablet where hover doesn't
+   fire reliably. ──
+   The hover LIFT lives here, on the outer wrapper, not on .fs-card
+   itself: .fs-card is position:absolute inside a 3D perspective
+   context (needed for the flip), and translateY-ing an absolutely
+   positioned element in that context causes a hover flicker loop —
+   the lift shifts it slightly out from under the cursor, hover turns
+   off, it drops back, hover turns back on, repeat. This wrapper is a
+   normal grid item with no 3D transform of its own, so the lift is
+   stable here. */
+.fs-card-flip {
+  perspective: 1400px;
+  height: 100%;
+  min-height: 340px;
+  transition: transform 0.2s;
+}
+.fs-card-flip:hover { transform: translateY(-3px); }
+.fs-card-flip-inner {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  transition: transform 0.6s cubic-bezier(0.4, 0.2, 0.2, 1);
+  transform-style: preserve-3d;
+}
+.fs-card-flip.flipped .fs-card-flip-inner { transform: rotateY(180deg); }
+.fs-card-face {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+  display: flex;
+  flex-direction: column;
+}
+.fs-card-front { transform: rotateY(0deg); }
+.fs-card-back {
+  transform: rotateY(180deg);
+  padding: 16px;
+  overflow-y: auto;
+}
+.fs-card-flip-btn {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: var(--surface);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 16px;
+  color: var(--text-2);
+  box-shadow: var(--shadow-sm);
+}
+.fs-card-flip-btn:hover { color: var(--accent); }
+.fs-card-flip-back-btn {
+  align-self: flex-end;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--bg);
+  border: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
+  color: var(--text-2);
+  margin-bottom: 8px;
+  flex-shrink: 0;
+}
+.fs-card-flip-back-btn:hover { background: var(--border); }
+.fs-card-back-name { font-weight: 800; font-size: 14px; margin-bottom: 4px; flex-shrink: 0; }
+.fs-card-back-category {
+  display: inline-block;
+  font-size: 10.5px;
+  font-weight: 700;
+  color: var(--accent);
+  background: var(--accent-soft);
+  padding: 2px 8px;
+  border-radius: 999px;
+  margin-bottom: 8px;
+  align-self: flex-start;
+  flex-shrink: 0;
+}
+.fs-card-back-desc {
+  font-size: 12.5px;
+  color: var(--text-2);
+  line-height: 1.5;
+  flex: 1;
+  margin-bottom: 8px;
+}
+.fs-card-back-stock { font-size: 12px; font-weight: 600; margin-bottom: 8px; flex-shrink: 0; }
+.fs-card-back-fulldetails {
+  background: none;
+  border: none;
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  margin-top: 8px;
+  padding: 0;
+  flex-shrink: 0;
+}
+.fs-card-back-fulldetails:hover { text-decoration: underline; }
 
 .fs-card-img-wrap {
   position: relative;
   height: 160px;
+  flex-shrink: 0;
   background: var(--bg);
   display: flex;
   align-items: center;
@@ -597,7 +718,8 @@ img { max-width: 100%; display: block; }
   z-index: 2;
 }
 
-.fs-card-body { padding: 10px 12px 12px; }
+.fs-card-body { padding: 10px 12px 12px; flex: 1; display: flex; flex-direction: column; }
+.fs-card-body .fs-card-add { margin-top: auto; }
 
 .fs-card-name {
   font-size: 13px;
@@ -698,6 +820,7 @@ img { max-width: 100%; display: block; }
 .fs-card-add:hover { background: var(--accent-dim); }
 .fs-card-add:active { transform: scale(0.98); }
 .fs-card-add:disabled { background: var(--border); color: var(--text-3); cursor: not-allowed; }
+.fs-card-add.added { background: #16a34a; }
 
 /* ════════════════════════════════════
    CART DRAWER
@@ -1074,6 +1197,20 @@ img { max-width: 100%; display: block; }
   color: var(--text-2);
   line-height: 1.6;
 }
+
+.fs-modal-specs {
+  margin-top: 14px;
+  padding-top: 14px;
+  border-top: 1px solid var(--border);
+}
+.fs-modal-spec-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12.5px;
+  padding: 4px 0;
+}
+.fs-modal-spec-row span:first-child { color: var(--text-3); }
+.fs-modal-spec-row span:last-child { color: var(--text); font-weight: 600; }
 
 .fs-pay-label {
   font-size: 11px;
@@ -1566,6 +1703,27 @@ img { max-width: 100%; display: block; }
 
   /* Floating WA */
   .fs-wa-float { bottom: 70px; right: 14px; width: 48px; height: 48px; font-size: 24px; }
+
+  /* Store Mode toggle — full label wraps to 3+ lines at this width */
+  .fs-store-mode-label-full { display: none; }
+  .fs-store-mode-label-short { display: block; }
+
+  /* Ask Assistant bar */
+  .fs-assistant { margin: 14px 12px 4px; padding: 16px; }
+  .fs-assistant-greet { font-size: 14px; margin-bottom: 10px; }
+  .fs-assistant-input { padding: 11px 14px; font-size: 13px; }
+  .fs-assistant-chip { padding: 7px 12px; font-size: 11.5px; }
+
+  /* Store Mode kiosk view */
+  .fs-storemode { padding: 16px 12px 32px; }
+  .fs-storemode-title { font-size: 20px; }
+  .fs-storemode-cart { padding: 14px; }
+
+  /* Account modal */
+  .fs-account-modal { padding: 26px 20px; }
+
+  /* Results header */
+  .fs-clear-filters-btn { font-size: 11px; padding: 5px 10px; }
 }
 
 /* ════════════════════════════════════
@@ -1592,6 +1750,219 @@ img { max-width: 100%; display: block; }
   .fs-cart-close { display: none; }
   .fs-topnav-cart-btn { display: none; }
 }
+
+/* ── Wishlist panel ── */
+.fs-wishlist-panel {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 24px;
+  max-width: 900px;
+  width: 92%;
+  max-height: 85vh;
+  overflow-y: auto;
+  margin: auto;
+}
+.fs-wishlist-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 18px;
+}
+.fs-wishlist-title { font-size: 19px; font-weight: 800; margin: 0; }
+.fs-wishlist-grid { margin-top: 0; }
+
+.fs-order-history-list { display: flex; flex-direction: column; gap: 10px; }
+.fs-order-history-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.fs-order-history-num { font-weight: 800; font-size: 13.5px; }
+.fs-order-history-date { font-size: 11.5px; color: var(--text-3); margin: 2px 0 6px; }
+.fs-order-history-items { font-size: 12.5px; color: var(--text-2); max-width: 360px; }
+.fs-order-history-total { font-weight: 800; font-size: 14px; }
+.fs-order-history-status {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: capitalize;
+  margin-top: 4px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  display: inline-block;
+}
+.fs-order-history-status.completed { background: #dcfce7; color: #15803d; }
+.fs-order-history-status.pending_payment { background: #fef3c7; color: #b45309; }
+
+@media (max-width: 768px) {
+  .fs-wishlist-panel { padding: 18px; width: 96%; max-height: 90vh; }
+  .fs-wishlist-title { font-size: 16px; }
+}
+
+/* ── Clear filters button ── */
+.fs-clear-filters-btn {
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1.5px solid var(--accent);
+  background: var(--white);
+  color: var(--accent);
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.fs-clear-filters-btn:hover { background: var(--accent-soft); }
+
+/* ── Sort select ── */
+.fs-sort-select {
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  border: 1.5px solid var(--border);
+  background: var(--white);
+  color: var(--text-2);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+}
+.fs-sort-select:hover { border-color: var(--accent); }
+
+/* ── Store Mode toggle ── */
+.fs-store-mode-btn.active { background: var(--accent); }
+.fs-store-mode-label-short { display: none; }
+
+/* ── Account modal ── */
+.fs-account-modal {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 32px 28px;
+  max-width: 360px;
+  width: 90%;
+  margin: auto;
+  position: relative;
+  text-align: center;
+  box-shadow: var(--shadow-lg);
+}
+.fs-account-icon { font-size: 40px; margin-bottom: 8px; }
+.fs-account-title { font-size: 19px; font-weight: 800; margin-bottom: 6px; }
+.fs-account-sub { font-size: 13px; color: var(--text-2); margin-bottom: 20px; line-height: 1.4; }
+.fs-account-input {
+  width: 100%;
+  padding: 12px 14px;
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  font-size: 14px;
+  margin-bottom: 10px;
+  outline: none;
+}
+.fs-account-input:focus { border-color: var(--accent); }
+.fs-account-save {
+  width: 100%;
+  padding: 13px;
+  border-radius: var(--radius);
+  background: var(--accent);
+  color: var(--white);
+  font-weight: 700;
+  font-size: 14px;
+  margin-top: 6px;
+}
+.fs-account-save:disabled { background: var(--border); color: var(--text-3); cursor: not-allowed; }
+
+/* ── Delivery checkout form (inside CartDrawer) ── */
+.fs-delivery-form { display: flex; flex-direction: column; gap: 10px; }
+.fs-delivery-form .fs-account-input { margin-bottom: 0; }
+.fs-delivery-back {
+  align-self: flex-start;
+  background: none;
+  border: none;
+  color: var(--text-2);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0 0 4px;
+}
+.fs-delivery-back:hover { color: var(--accent); }
+.fs-pay-method-btn {
+  flex: 1;
+  padding: 12px;
+  border-radius: var(--radius);
+  border: 1.5px solid var(--border);
+  background: var(--white);
+  font-size: 13.5px;
+  font-weight: 700;
+  color: var(--text-2);
+}
+.fs-pay-method-btn:hover { border-color: var(--accent); }
+
+/* ── Ask Assistant bar ── */
+.fs-assistant {
+  margin: 20px 20px 4px;
+  padding: 20px;
+  background: linear-gradient(135deg, var(--accent-soft), #ffffff);
+  border: 1.5px solid var(--accent-soft);
+  border-radius: var(--radius-lg);
+}
+.fs-assistant-greet { font-size: 16px; font-weight: 700; margin-bottom: 12px; color: var(--black); }
+.fs-assistant-input-row { display: flex; gap: 8px; margin-bottom: 12px; }
+.fs-assistant-input {
+  flex: 1;
+  padding: 13px 16px;
+  border: 1.5px solid var(--border);
+  border-radius: 999px;
+  font-size: 14px;
+  outline: none;
+  background: var(--white);
+}
+.fs-assistant-input:focus { border-color: var(--accent); }
+.fs-assistant-go {
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--white);
+  font-size: 18px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+.fs-assistant-go:hover { background: var(--accent-dim); }
+.fs-assistant-chips { display: flex; flex-wrap: wrap; gap: 8px; }
+.fs-assistant-chip {
+  padding: 8px 14px;
+  border-radius: 999px;
+  border: 1.5px solid var(--border);
+  background: var(--white);
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-2);
+}
+.fs-assistant-chip:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ── Store Mode kiosk view ── */
+.fs-storemode { max-width: 560px; margin: 0 auto; padding: 24px 16px 40px; }
+.fs-storemode-head { text-align: center; margin-bottom: 16px; }
+.fs-storemode-title { font-size: 24px; font-weight: 800; margin-bottom: 6px; }
+.fs-storemode-sub { font-size: 13.5px; color: var(--text-2); line-height: 1.5; }
+.fs-storemode-cart {
+  background: var(--surface);
+  border-radius: var(--radius-lg);
+  padding: 16px;
+  margin-top: 16px;
+  box-shadow: var(--shadow-sm);
+}
+.fs-storemode-cart-head { font-weight: 700; font-size: 15px; margin-bottom: 10px; }
+.fs-storemode-btn {
+  width: 100%;
+  padding: 15px;
+  margin-top: 14px;
+  border-radius: var(--radius);
+  background: var(--black);
+  color: var(--white);
+  font-weight: 700;
+  font-size: 15px;
+}
+.fs-storemode-btn:disabled { background: var(--border); color: var(--text-3); cursor: not-allowed; }
 
 /* ── Barcode scanner panel ── */
 .fs-scanner {
