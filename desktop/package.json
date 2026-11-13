@@ -54,7 +54,7 @@
     "afterPack": "scripts/after-pack.js"
   },
   "devDependencies": {
-    "electron": "^45.3.1",
+    "electron": "43.8.10",
     "electron-builder": "^26.18.0"
   }
 }
