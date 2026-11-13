@@ -1,0 +1,60 @@
+{
+  "name": "shorewinds-crm",
+  "productName": "Shorewinds CRM",
+  "version": "1.0.0",
+  "description": "Shorewinds CRM desktop app",
+  "author": "KojoT",
+  "main": "main.js",
+  "scripts": {
+    "prepare-app": "node scripts/prepare.js",
+    "start": "node scripts/prepare.js && electron .",
+    "start:quick": "electron .",
+    "dist:win": "node scripts/prepare.js && electron-builder --win --x64",
+    "dist:mac": "node scripts/prepare.js && electron-builder --mac --x64 --arm64"
+  },
+  "build": {
+    "appId": "com.shorewinds.crm",
+    "productName": "Shorewinds CRM",
+    "copyright": "Shorewinds",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "ui-server.js",
+      "backup.js",
+      "build/icon.png"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Shorewinds CRM",
+      "artifactName": "Shorewinds-CRM-Setup-${version}.exe"
+    },
+    "mac": {
+      "target": "dmg",
+      "category": "public.app-category.business",
+      "icon": "build/icon.png"
+    },
+    "dmg": {
+      "artifactName": "Shorewinds-CRM-${version}-${arch}.dmg"
+    },
+    "afterPack": "scripts/after-pack.js"
+  },
+  "devDependencies": {
+    "electron": "^45.3.1",
+    "electron-builder": "^26.18.0"
+  }
+}
